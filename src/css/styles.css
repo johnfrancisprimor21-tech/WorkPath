@@ -149,7 +149,8 @@ summary {
 }
 
 .field input,
-.field select {
+.field select,
+.field textarea {
   width: 100%;
   min-height: 3rem;
   padding: 0.68rem 0.8rem;
@@ -158,6 +159,11 @@ summary {
   background: var(--color-surface);
   color: var(--color-text);
   font-size: 1rem;
+}
+
+.field textarea {
+  min-height: 6rem;
+  resize: vertical;
 }
 
 .field input::placeholder {
@@ -205,6 +211,15 @@ summary {
   border-color: var(--color-border);
   background: var(--color-surface);
   color: var(--color-text);
+}
+
+.button-danger {
+  background: var(--color-danger);
+  color: var(--color-danger-surface);
+}
+
+.button-danger:hover:not(:disabled) {
+  filter: brightness(0.92);
 }
 
 .button-wide {
@@ -339,6 +354,201 @@ summary {
 
 .card-actions {
   margin-top: var(--space-4);
+}
+
+.employed-page,
+.dashboard-page {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.employed-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  padding: 0.35rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-large);
+  background: var(--color-surface);
+}
+
+.employed-nav-link {
+  display: flex;
+  min-height: 2.8rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.55rem 0.35rem;
+  border-radius: var(--radius-small);
+  color: var(--color-text);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}
+
+.employed-nav-link.active {
+  background: var(--color-surface-muted);
+  color: var(--color-primary);
+}
+
+.dashboard-feature-links,
+.record-actions,
+.month-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dashboard-feature-links {
+  margin-top: var(--space-3);
+}
+
+.dashboard-feature-links a {
+  text-decoration: none;
+}
+
+.record-form {
+  margin: var(--space-4) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+}
+
+.record-form h2 {
+  margin: 0;
+  font-size: 1.2rem;
+}
+
+.checkbox-control {
+  display: flex;
+  min-height: 2.8rem;
+  align-items: center;
+  gap: var(--space-2);
+  cursor: pointer;
+}
+
+.checkbox-control input {
+  width: 1.2rem;
+  height: 1.2rem;
+  flex: 0 0 auto;
+  accent-color: var(--color-primary);
+}
+
+.record-list {
+  display: grid;
+  gap: var(--space-4);
+  margin-top: var(--space-4);
+}
+
+.shift-day-group {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.shift-date-heading,
+.month-heading {
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.month-controls {
+  justify-content: space-between;
+}
+
+.month-heading {
+  flex: 1 1 auto;
+  text-align: center;
+}
+
+.month-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-2);
+  margin: var(--space-3) 0;
+}
+
+.summary-item {
+  display: grid;
+  align-content: start;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.7rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface-muted);
+}
+
+.summary-label,
+.record-meta,
+.record-subtitle,
+.record-notes {
+  color: var(--color-muted);
+}
+
+.summary-label {
+  font-size: 0.76rem;
+}
+
+.summary-value {
+  overflow-wrap: anywhere;
+  font-size: 0.95rem;
+}
+
+.record-card,
+.empty-state {
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-small);
+  background: var(--color-surface);
+}
+
+.record-card h2,
+.record-card h3,
+.empty-state h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.record-card > p,
+.empty-state p {
+  margin: var(--space-2) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.record-subtitle {
+  font-weight: 650;
+}
+
+.record-actions {
+  margin-top: var(--space-3);
+}
+
+.inline-confirmation-copy {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--color-muted);
+}
+
+.overtime-badge {
+  display: inline-flex;
+  margin-top: var(--space-2);
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-primary);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.empty-state {
+  display: grid;
+  justify-items: start;
+  gap: var(--space-2);
+}
+
+.empty-state p {
+  color: var(--color-muted);
 }
 
 .loading-panel {

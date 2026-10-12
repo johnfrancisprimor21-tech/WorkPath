@@ -1,6 +1,6 @@
 # Workpath
 
-Workpath is a mobile-first Vite app built with vanilla JavaScript and Supabase Auth. This task provides the app shell, profile onboarding, and placeholder dashboards.
+Workpath is a mobile-first Vite app built with vanilla JavaScript and Supabase. It includes authentication, onboarding, and the first employed-mode tools for managing jobs and shifts.
 
 ## Run the app
 
@@ -33,7 +33,34 @@ Use a test email account in the Supabase project configured above.
 8. Log out. Verify the app returns to sign in. Visit `#/app` and `#/onboarding` while signed out; both should redirect to `#/login`.
 9. Optionally switch the device appearance between light and dark, and use the form with a keyboard to check theme and focus styling.
 
-Tracking features are not part of this task, so the dashboard currently shows mode-specific placeholders.
+## Employed routes
+
+- `#/app` shows the dashboard and, in Employed mode, links to shift logging and jobs.
+- `#/employed/shifts` lets you record duty days and days off, view monthly worked-time summaries, and edit or delete shifts.
+- `#/employed/jobs` lets you add, edit, end, and delete employments.
+
+Employed routes redirect to the dashboard while Job Seeker mode is selected. Shift hours are read from the `shifts_with_hours` database view. The app converts local times using the profile time zone, rejects skipped spring-forward times, and uses the first occurrence of repeated fall-back times.
+
+## Verify the app
+
+Run the automated time conversion tests and production build:
+
+```sh
+npm test
+npm run build
+```
+
+Manual checklist (use an account set to Employed mode):
+
+1. Add a job with employer, optional title/rate, and dates. Edit it, then mark it ended and confirm its end date defaults to today in the profile time zone. Delete a job and confirm the inline message explains linked shifts will remain without the employer.
+2. Log a normal duty shift with a break and employer. Confirm it appears under the selected date with time, break, employer, and worked hours from the view. Edit it and save the change.
+3. Log an overnight shift from 10:00 pm to 6:00 am with a 60 minute break. Confirm the next-day hint appears and it shows `7h 0m` worked.
+4. Log an Off day and confirm time, break, and overtime controls are hidden. Also check Leave, Sick, and Holiday can be saved as non-duty days.
+5. Use previous/next month controls and confirm each month loads its own grouped shifts and summary. Delete a shift using the inline confirmation.
+6. Change to Job Seeker mode and confirm the employed links and employed routes are no longer available. Switch back and confirm jobs and shifts are still present. While in Job Seeker mode, open `#/employed/shifts` directly and confirm it redirects to `#/app`.
+7. Try the shift form on a New York spring-forward date at 2:30 am and confirm it asks for another time. On the fall-back repeated 1:30 am time, confirm it resolves to the first occurrence.
+
+Automated tests use Node's built-in test runner and cover Asia/Manila, New York daylight-saving transitions, and an overnight shift. No extra test dependencies are required.
 
 ## Apply the database migration
 

@@ -1,12 +1,14 @@
 import { el, makeButton, pageCard } from './dom.js';
 import { createModeChoice } from './mode-choice.js';
 import { createPreferenceFields } from './profile-fields.js';
+import { renderEmployedNavigation } from '../employed/navigation.js';
 
 export function renderDashboard(profile, options) {
   const name = profile.display_name || 'Your Workpath';
   const modeLabel = profile.mode === 'employed' ? 'Employed' : 'Job Seeker';
   const card = pageCard('Hello, ' + name, 'Your current mode is ' + modeLabel + '.');
   const modeSummary = card.querySelector('.card-description');
+  const navigationSlot = el('div');
   const feedback = el('p', { className: 'status-message', attrs: { role: 'status' } });
   setFeedback(feedback, options.notice, options.noticeKind || 'success');
   card.append(feedback);
@@ -17,15 +19,9 @@ export function renderDashboard(profile, options) {
   const modeStatus = el('p', { className: 'status-message', attrs: { role: 'status' } });
   card.append(modeStatus);
 
-  const placeholderHeading = el('h2', {
-    text: profile.mode === 'employed' ? 'Employed dashboard coming soon' : 'Job seeker dashboard coming soon'
-  });
-  const placeholderPanel = el('section', { className: 'placeholder-panel' }, [
-    el('p', { className: 'eyebrow', text: 'YOUR DASHBOARD' }),
-    placeholderHeading,
-    el('p', { text: 'Switching modes changes your dashboard view. Your saved data stays in place.' })
-  ]);
-  card.append(placeholderPanel);
+  const modePanel = el('section', { className: 'placeholder-panel' });
+  updateModeContent(profile.mode);
+  card.append(modePanel);
 
   const settings = renderSettings(profile, options);
   card.append(settings.element);
@@ -62,16 +58,16 @@ export function renderDashboard(profile, options) {
     }
   });
   card.append(el('div', { className: 'card-actions' }, [logout]));
-  const element = el('div', { className: 'page-wrap dashboard-page' }, [card]);
+  const element = el('div', { className: 'page-wrap dashboard-page' }, [navigationSlot, card]);
+  updateNavigation(profile.mode);
 
   return {
     element,
     updateMode(updatedProfile, notice, noticeKind = 'success') {
       const updatedModeLabel = updatedProfile.mode === 'employed' ? 'Employed' : 'Job Seeker';
       modeSummary.textContent = 'Your current mode is ' + updatedModeLabel + '.';
-      placeholderHeading.textContent = updatedProfile.mode === 'employed'
-        ? 'Employed dashboard coming soon'
-        : 'Job seeker dashboard coming soon';
+      updateModeContent(updatedProfile.mode);
+      updateNavigation(updatedProfile.mode);
       for (const choice of modeChoice.element.querySelectorAll('input')) {
         choice.checked = choice.value === updatedProfile.mode;
         choice.disabled = false;
@@ -82,6 +78,33 @@ export function renderDashboard(profile, options) {
       setFeedback(feedback, notice, noticeKind);
     }
   };
+
+  function updateNavigation(mode) {
+    if (mode === 'employed') navigationSlot.replaceChildren(renderEmployedNavigation('/app'));
+    else navigationSlot.replaceChildren();
+  }
+
+  function updateModeContent(mode) {
+    if (mode === 'employed') {
+      const heading = el('h2', { text: 'Employed workspace' });
+      const links = el('div', { className: 'dashboard-feature-links' }, [
+        el('a', { className: 'button button-primary', text: 'Log a shift', attrs: { href: '#/employed/shifts' } }),
+        el('a', { className: 'button button-secondary', text: 'My jobs', attrs: { href: '#/employed/jobs' } })
+      ]);
+      modePanel.replaceChildren(
+        el('p', { className: 'eyebrow', text: 'YOUR DASHBOARD' }),
+        heading,
+        el('p', { text: 'Track jobs and record your work days.' }),
+        links
+      );
+    } else {
+      modePanel.replaceChildren(
+        el('p', { className: 'eyebrow', text: 'YOUR DASHBOARD' }),
+        el('h2', { text: 'Job seeker dashboard coming soon' }),
+        el('p', { text: 'Switching modes changes your dashboard view. Your saved data stays in place.' })
+      );
+    }
+  }
 }
 
 function renderSettings(profile, options) {

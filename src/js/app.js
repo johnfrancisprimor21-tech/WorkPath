@@ -4,6 +4,8 @@ import { el, makeButton, pageCard } from './shared/dom.js';
 import { navigate, routeFromHash, watchRoutes } from './shared/router.js';
 import { renderOnboarding } from './onboarding/onboarding.js';
 import { getSupabaseClient } from './supabase.js';
+import { renderJobsPage } from './employed/jobs.js';
+import { renderShiftsPage } from './employed/shifts.js';
 
 const root = document.getElementById('app');
 const PROFILE_COLUMNS = 'id, display_name, mode, currency, pay_frequency, timezone, onboarded';
@@ -161,6 +163,31 @@ function renderRoute() {
       renderProblem('Setup choices unavailable', error.message, {
         label: 'Log out',
         action: logout
+      });
+    }
+    return;
+  }
+
+  if (route === null || route === '/login' || route === '/signup' || route === '/onboarding') {
+    navigate('/app', { replace: true });
+    return;
+  }
+
+  if (route === '/employed/jobs' || route === '/employed/shifts') {
+    if (state.profile.mode !== 'employed') {
+      navigate('/app', { replace: true });
+      return;
+    }
+    dashboardView = null;
+    const pageOptions = { supabase, userId: state.session.user.id, profile: state.profile };
+    try {
+      root.replaceChildren(route === '/employed/jobs'
+        ? renderJobsPage(pageOptions)
+        : renderShiftsPage(pageOptions));
+    } catch (error) {
+      renderProblem('Employed records unavailable', error.message || 'We could not open this page.', {
+        label: 'Return home',
+        action: () => navigate('/app')
       });
     }
     return;
