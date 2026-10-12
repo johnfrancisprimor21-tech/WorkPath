@@ -83,11 +83,15 @@ export function createPreferenceFields(profile = {}, scope = 'preferences') {
   for (const region of [...zonesByRegion.keys()].sort((a, b) => a.localeCompare(b))) {
     const regionGroup = el('optgroup', { attrs: { label: region } });
     const zones = zonesByRegion.get(region);
-    zones.sort((left, right) => {
-      const offsetDifference = getUtcOffsetMinutes(left, referenceDate) - getUtcOffsetMinutes(right, referenceDate);
-      return offsetDifference || left.localeCompare(right);
-    });
-    for (const zone of zones) regionGroup.append(timeZoneOption(zone, referenceDate));
+    zones.sort((left, right) => getCityName(left).localeCompare(getCityName(right)) || left.localeCompare(right));
+    const cityCounts = new Map();
+    for (const zone of zones) {
+      const city = getCityName(zone);
+      cityCounts.set(city, (cityCounts.get(city) || 0) + 1);
+    }
+    for (const zone of zones) {
+      regionGroup.append(timeZoneOption(zone, referenceDate, cityCounts.get(getCityName(zone)) > 1));
+    }
     timeZoneSelect.append(regionGroup);
   }
 
@@ -121,9 +125,16 @@ function currencyOption(code, displayNames) {
   });
 }
 
-function timeZoneOption(zone, referenceDate) {
+function timeZoneOption(zone, referenceDate, disambiguate = false) {
+  const city = getCityName(zone);
+  const path = disambiguate ? zone.split('/').slice(1, -1).join('/').replaceAll('_', ' ') : '';
   const offset = formatUtcOffset(getUtcOffsetMinutes(zone, referenceDate));
-  return el('option', { text: '(' + offset + ') ' + zone, attrs: { value: zone } });
+  const label = path ? city + ' (' + path + ')' : city;
+  return el('option', { text: label + ' (' + offset + ')', attrs: { value: zone } });
+}
+
+function getCityName(zone) {
+  return zone.split('/').at(-1).replaceAll('_', ' ');
 }
 
 function getUtcOffsetMinutes(zone, date) {
