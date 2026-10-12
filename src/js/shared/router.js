@@ -1,4 +1,4 @@
-const ROUTES = new Set(['/login', '/signup', '/onboarding', '/app', '/employed/jobs', '/employed/shifts']);
+const ROUTES = new Set(['/login', '/signup', '/onboarding', '/app', '/employed/jobs', '/employed/shifts', '/seeker/applications']);
 
 export function routeFromHash() {
   const path = window.location.hash.replace(/^#/, '');

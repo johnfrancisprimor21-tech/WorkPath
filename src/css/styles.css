@@ -11,6 +11,8 @@
   --color-on-primary: #ffffff;
   --color-danger: #9b2525;
   --color-danger-surface: #fff0ee;
+  --color-warning: #6d4a00;
+  --color-warning-surface: #fff3cf;
   --color-success: #145b39;
   --color-success-surface: #e9f6ee;
   --color-focus: #bd5a00;
@@ -30,6 +32,10 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 body {
   min-width: 320px;
   min-height: 100vh;
@@ -42,7 +48,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -50,6 +57,7 @@ button,
 a,
 input,
 select,
+textarea,
 summary {
   -webkit-tap-highlight-color: transparent;
 }
@@ -357,7 +365,8 @@ summary {
 }
 
 .employed-page,
-.dashboard-page {
+.dashboard-page,
+.seeker-page {
   display: grid;
   gap: var(--space-3);
 }
@@ -388,6 +397,10 @@ summary {
 .employed-nav-link.active {
   background: var(--color-surface-muted);
   color: var(--color-primary);
+}
+
+.seeker-nav {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .dashboard-feature-links,
@@ -551,6 +564,159 @@ summary {
   color: var(--color-muted);
 }
 
+.application-tools {
+  display: grid;
+  gap: var(--space-3);
+  margin: var(--space-3) 0;
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filter-chip {
+  min-height: 2.6rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+}
+
+.filter-chip.active {
+  border-color: var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+}
+
+.latest-note {
+  margin: 0 0 var(--space-2);
+}
+
+.empty-filter-state {
+  margin: var(--space-4) 0;
+  color: var(--color-muted);
+}
+
+.application-card {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.application-title-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.application-title-row h2 {
+  overflow-wrap: anywhere;
+}
+
+.application-status-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 1.8rem;
+  padding: 0.18rem 0.6rem;
+  border-radius: 999px;
+  background: var(--color-surface-muted);
+  color: var(--color-text);
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.application-status-badge.status-interview,
+.application-status-badge.status-offer {
+  background: var(--color-success-surface);
+  color: var(--color-success);
+}
+
+.application-status-badge.status-rejected {
+  background: var(--color-danger-surface);
+  color: var(--color-danger);
+}
+
+.application-status-badge.status-no_response {
+  border: 1px solid var(--color-border);
+}
+
+.application-card > .field {
+  margin-top: var(--space-2);
+}
+
+.job-url-link,
+.dashboard-applications-link {
+  width: fit-content;
+  margin-top: var(--space-1);
+}
+
+.application-summary {
+  margin: var(--space-3) 0 0;
+  color: var(--color-muted);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+.status-warning {
+  display: block;
+  padding: 0.5rem 0.65rem;
+  border-radius: var(--radius-small);
+  background: var(--color-warning-surface);
+  color: var(--color-warning);
+}
+
+.application-timeline {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.application-timeline summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.timeline-list {
+  display: grid;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+
+.timeline-event {
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid var(--color-primary);
+  border-radius: 0 var(--radius-small) var(--radius-small) 0;
+  background: var(--color-surface-muted);
+}
+
+.timeline-event h3 {
+  margin: 0;
+  font-size: 0.98rem;
+}
+
+.timeline-event p {
+  margin: var(--space-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.timeline-event > .button {
+  margin-top: var(--space-2);
+}
+
+.application-timeline > .record-form {
+  margin-bottom: 0;
+}
+
 .loading-panel {
   display: grid;
   min-height: 11rem;
@@ -610,6 +776,8 @@ summary {
     --color-on-primary: #102019;
     --color-danger: #ffc1b7;
     --color-danger-surface: #48231f;
+    --color-warning: #ffe09a;
+    --color-warning-surface: #493600;
     --color-success: #a8e6be;
     --color-success-surface: #183b2a;
     --color-focus: #ffd166;

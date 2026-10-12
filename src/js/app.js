@@ -6,6 +6,8 @@ import { renderOnboarding } from './onboarding/onboarding.js';
 import { getSupabaseClient } from './supabase.js';
 import { renderJobsPage } from './employed/jobs.js';
 import { renderShiftsPage } from './employed/shifts.js';
+import { renderApplicationsPage } from './job-seeker/applications.js';
+import { APPLICATION_STATUSES } from './job-seeker/helpers.js';
 
 const root = document.getElementById('app');
 const PROFILE_COLUMNS = 'id, display_name, mode, currency, pay_frequency, timezone, onboarded';
@@ -193,6 +195,24 @@ function renderRoute() {
     return;
   }
 
+  if (route === '/seeker/applications') {
+    if (state.profile.mode !== 'job_seeker') {
+      navigate('/app', { replace: true });
+      return;
+    }
+    dashboardView = null;
+    const pageOptions = { supabase, userId: state.session.user.id, profile: state.profile };
+    try {
+      root.replaceChildren(renderApplicationsPage(pageOptions));
+    } catch (error) {
+      renderProblem('Applications unavailable', error.message || 'We could not open this page.', {
+        label: 'Return home',
+        action: () => navigate('/app')
+      });
+    }
+    return;
+  }
+
   if (route !== '/app') {
     navigate('/app', { replace: true });
     return;
@@ -204,6 +224,7 @@ function renderRoute() {
       noticeKind: state.noticeKind,
       onModeChange: changeMode,
       onSaveSettings: saveSettings,
+      loadApplicationSummary,
       onLogout: logout
     };
     if (dashboardView?.element.parentElement === root) {
@@ -215,6 +236,19 @@ function renderRoute() {
   } catch (error) {
     renderProblem('Settings unavailable', error.message, { label: 'Log out', action: logout });
   }
+}
+
+async function loadApplicationSummary() {
+  if (!state.session) throw new Error('Your session ended. Please sign in again.');
+  const userId = state.session.user.id;
+  const queries = [null, ...APPLICATION_STATUSES].map(async (status) => {
+    let query = supabase.from('applications').select('id', { count: 'exact', head: true }).eq('user_id', userId);
+    if (status) query = query.eq('status', status);
+    const result = await query;
+    if (result.error) throw result.error;
+    return [status || 'all', result.count || 0];
+  });
+  return Object.fromEntries(await Promise.all(queries));
 }
 
 async function submitAuthForm({ email, password, mode }) {

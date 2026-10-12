@@ -2,6 +2,7 @@ import { el, makeButton, pageCard } from './dom.js';
 import { createModeChoice } from './mode-choice.js';
 import { createPreferenceFields } from './profile-fields.js';
 import { renderEmployedNavigation } from '../employed/navigation.js';
+import { renderJobSeekerNavigation } from '../job-seeker/navigation.js';
 
 export function renderDashboard(profile, options) {
   const name = profile.display_name || 'Your Workpath';
@@ -20,6 +21,7 @@ export function renderDashboard(profile, options) {
   card.append(modeStatus);
 
   const modePanel = el('section', { className: 'placeholder-panel' });
+  let summaryVersion = 0;
   updateModeContent(profile.mode);
   card.append(modePanel);
 
@@ -81,10 +83,11 @@ export function renderDashboard(profile, options) {
 
   function updateNavigation(mode) {
     if (mode === 'employed') navigationSlot.replaceChildren(renderEmployedNavigation('/app'));
-    else navigationSlot.replaceChildren();
+    else navigationSlot.replaceChildren(renderJobSeekerNavigation('/app'));
   }
 
   function updateModeContent(mode) {
+    const version = ++summaryVersion;
     if (mode === 'employed') {
       const heading = el('h2', { text: 'Employed workspace' });
       const links = el('div', { className: 'dashboard-feature-links' }, [
@@ -98,11 +101,39 @@ export function renderDashboard(profile, options) {
         links
       );
     } else {
+      const summary = el('p', {
+        className: 'application-summary',
+        text: 'Loading application summary…',
+        attrs: { role: 'status', 'aria-live': 'polite' }
+      });
       modePanel.replaceChildren(
         el('p', { className: 'eyebrow', text: 'YOUR DASHBOARD' }),
-        el('h2', { text: 'Job seeker dashboard coming soon' }),
-        el('p', { text: 'Switching modes changes your dashboard view. Your saved data stays in place.' })
+        el('h2', { text: 'Your job search' }),
+        el('p', { text: 'Keep your applications and follow their updates.' }),
+        el('a', {
+          className: 'button button-primary dashboard-applications-link',
+          text: 'My applications',
+          attrs: { href: '#/seeker/applications' }
+        }),
+        summary
       );
+      void loadSummary(summary, version);
+    }
+  }
+
+  async function loadSummary(target, version) {
+    if (!options.loadApplicationSummary) {
+      target.textContent = 'Application summary is unavailable right now.';
+      return;
+    }
+    try {
+      const counts = await options.loadApplicationSummary();
+      if (version !== summaryVersion) return;
+      target.textContent = 'Applications: ' + counts.all + ' total · Pending ' + counts.pending
+        + ' · Interview ' + counts.interview + ' · Offer ' + counts.offer
+        + ' · Rejected ' + counts.rejected + ' · No response ' + counts.no_response;
+    } catch {
+      if (version === summaryVersion) target.textContent = 'Application summary is unavailable right now.';
     }
   }
 }
