@@ -5,8 +5,7 @@ import { renderEmployedNavigation } from './navigation.js';
 const JOB_COLUMNS = 'id, employer_name, job_title, hourly_rate, start_date, end_date, is_current';
 
 export function renderJobsPage({ supabase, userId, profile }) {
-  const page = el('div', { className: 'page-wrap employed-page' });
-  page.append(renderEmployedNavigation('/employed/jobs'));
+  const page = el('div', { className: 'page-wrap authenticated-page employed-page' });
 
   const card = pageCard('My jobs', 'Keep track of your current and past jobs.');
   page.append(card);
@@ -58,12 +57,15 @@ export function renderJobsPage({ supabase, userId, profile }) {
 
     for (const job of jobs) {
       const item = el('article', { className: 'record-card' });
-      item.append(el('h2', { text: job.employer_name }));
-      if (job.job_title) item.append(el('p', { className: 'record-subtitle', text: job.job_title }));
-      const dates = [
-        job.start_date ? 'Started ' + job.start_date : null,
-        job.is_current ? 'Current' : job.end_date ? 'Ended ' + job.end_date : 'Past job'
-      ].filter(Boolean);
+      const identity = el('div', { className: 'job-identity' }, [el('h2', { text: job.employer_name })]);
+      if (job.job_title) identity.append(el('p', { className: 'record-subtitle', text: job.job_title }));
+      const statusLabel = job.is_current ? 'Current' : 'Ended';
+      item.append(el('div', { className: 'job-card-heading' }, [
+        identity,
+        el('span', { className: 'job-status-badge' + (job.is_current ? ' current' : ' ended'), text: statusLabel })
+      ]));
+      const dates = [job.start_date ? 'Started ' + job.start_date : null, !job.is_current && job.end_date ? 'Ended ' + job.end_date : null]
+        .filter(Boolean);
       item.append(el('p', { className: 'record-meta', text: dates.join(' · ') }));
       item.append(el('p', {
         className: 'record-meta',
@@ -234,6 +236,7 @@ export function renderJobsPage({ supabase, userId, profile }) {
     for (const button of page.querySelectorAll('button')) button.disabled = busy;
   }
 
+  page.append(renderEmployedNavigation('/employed/jobs'));
   return page;
 }
 

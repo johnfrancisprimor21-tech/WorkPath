@@ -2,7 +2,7 @@ import { el, field, makeButton, pageCard } from '../shared/dom.js';
 import {
   addCalendarDay,
   currentMonthInTimeZone,
-  formatDateLabel,
+  formatShiftDateLabel,
   formatMonthLabel,
   formatTime,
   localDateTimeToUtc,
@@ -11,9 +11,10 @@ import {
   utcToLocalDateTime
 } from '../shared/time.js';
 import { renderEmployedNavigation } from './navigation.js';
+import { createIcon } from '../shared/icons.js';
+import { fetchShiftMonth, formatWorkedMinutes, summarizeShifts } from './shift-summary.js';
 
 const JOB_COLUMNS = 'id, employer_name, job_title, start_date, is_current';
-const SHIFT_COLUMNS = 'id, employment_id, work_date, day_type, time_in, time_out, break_minutes, is_overtime, notes, worked_minutes';
 const DAY_TYPES = [
   ['duty', 'Duty'],
   ['off', 'Off'],
@@ -23,8 +24,7 @@ const DAY_TYPES = [
 ];
 
 export function renderShiftsPage({ supabase, userId, profile }) {
-  const page = el('div', { className: 'page-wrap employed-page' });
-  page.append(renderEmployedNavigation('/employed/shifts'));
+  const page = el('div', { className: 'page-wrap authenticated-page employed-page' });
   const card = pageCard('Shifts', 'Log work days, days off, and time worked.');
   page.append(card);
 
@@ -33,14 +33,21 @@ export function renderShiftsPage({ supabase, userId, profile }) {
   let shifts = [];
   const message = el('p', { className: 'status-message', attrs: { role: 'status' } });
   const monthHeading = el('h2', { className: 'month-heading', text: formatMonthLabel(selectedMonth) });
-  const previous = makeButton('Previous month', { className: 'button button-secondary' });
-  const next = makeButton('Next month', { className: 'button button-secondary' });
+  const previous = makeButton('', { className: 'button button-secondary month-arrow' });
+  previous.setAttribute('aria-label', 'Previous month');
+  previous.append(createIcon('previous'));
+  const next = makeButton('', { className: 'button button-secondary month-arrow' });
+  next.setAttribute('aria-label', 'Next month');
+  next.append(createIcon('next'));
   const monthControls = el('div', { className: 'month-controls' }, [previous, monthHeading, next]);
   const summary = el('section', { className: 'month-summary', attrs: { 'aria-label': 'Monthly shift summary' } });
-  const addButton = makeButton('Log a shift', { className: 'button button-primary' });
+  const addButton = makeButton('', { className: 'button button-primary floating-add-button' });
+  addButton.setAttribute('aria-label', 'Log a shift');
+  addButton.title = 'Log a shift';
+  addButton.append(createIcon('plus'));
   const formSlot = el('div');
   const list = el('div', { className: 'record-list' });
-  card.append(message, monthControls, summary, addButton, formSlot, list);
+  card.append(message, monthControls, summary, formSlot, list);
 
   addButton.addEventListener('click', () => openForm());
   previous.addEventListener('click', () => changeMonth(-1));
@@ -72,19 +79,8 @@ export function renderShiftsPage({ supabase, userId, profile }) {
   async function loadMonth() {
     setMessage(message, 'Loading shifts…', 'loading');
     setControlsBusy(true);
-    const firstDay = selectedMonth + '-01';
-    const afterMonth = shiftMonth(selectedMonth, 1) + '-01';
     try {
-      const { data, error } = await supabase
-        .from('shifts_with_hours')
-        .select(SHIFT_COLUMNS)
-        .eq('user_id', userId)
-        .gte('work_date', firstDay)
-        .lt('work_date', afterMonth)
-        .order('work_date', { ascending: false })
-        .order('time_in', { ascending: false, nullsFirst: false });
-      if (error) throw error;
-      shifts = data || [];
+      shifts = await fetchShiftMonth(supabase, userId, selectedMonth);
       monthHeading.textContent = formatMonthLabel(selectedMonth);
       renderSummary();
       renderList();
@@ -106,15 +102,11 @@ export function renderShiftsPage({ supabase, userId, profile }) {
   }
 
   function renderSummary() {
-    const workedMinutes = shifts.reduce((sum, shift) => sum + Number(shift.worked_minutes || 0), 0);
-    const dutyDates = new Set(shifts
-      .filter((shift) => shift.day_type === 'duty' && shift.time_in && shift.time_out)
-      .map((shift) => shift.work_date));
-    const overtimeCount = shifts.filter((shift) => shift.is_overtime).length;
+    const values = summarizeShifts(shifts);
     summary.replaceChildren(
-      summaryItem('Worked', formatWorkedMinutes(workedMinutes)),
-      summaryItem('Days with duty time', String(dutyDates.size)),
-      summaryItem('Overtime shifts', String(overtimeCount))
+      summaryItem('Total worked time', formatWorkedMinutes(values.workedMinutes)),
+      summaryItem('Overtime shifts', String(values.overtimeCount)),
+      summaryItem('Days worked', String(values.daysWorked))
     );
   }
 
@@ -145,7 +137,7 @@ export function renderShiftsPage({ supabase, userId, profile }) {
     }
     for (const [date, dayShifts] of groups) {
       const group = el('section', { className: 'shift-day-group' });
-      group.append(el('h2', { className: 'shift-date-heading', text: formatDateLabel(date) }));
+      group.append(el('h2', { className: 'shift-date-heading', text: formatShiftDateLabel(date, profile.timezone) }));
       for (const shift of dayShifts) group.append(renderShift(shift));
       list.append(group);
     }
@@ -154,18 +146,28 @@ export function renderShiftsPage({ supabase, userId, profile }) {
   function renderShift(shift) {
     const card = el('article', { className: 'record-card shift-card' });
     const dayLabel = DAY_TYPES.find(([value]) => value === shift.day_type)?.[1] || 'Shift';
-    card.append(el('h3', { text: dayLabel }));
     const job = jobs.find((entry) => entry.id === shift.employment_id);
-    if (job) card.append(el('p', { className: 'record-subtitle', text: job.employer_name }));
-    else if (shift.employment_id) card.append(el('p', { className: 'record-subtitle', text: 'Employer unavailable' }));
+    const identity = el('div', { className: 'shift-identity' });
+    if (job) {
+      identity.append(el('h3', { text: job.employer_name }));
+      if (job.job_title) identity.append(el('p', { className: 'record-subtitle', text: job.job_title }));
+    } else {
+      identity.append(el('h3', {
+        text: shift.employment_id ? 'Employer unavailable' : shift.day_type === 'duty' ? 'Work day' : dayLabel
+      }));
+    }
+    card.append(el('div', { className: 'shift-card-heading' }, [
+      identity,
+      el('span', { className: 'day-type-badge day-type-' + shift.day_type, text: dayLabel })
+    ]));
 
     if (shift.day_type === 'duty' && shift.time_in && shift.time_out) {
       const end = utcToLocalDateTime(shift.time_out, profile.timezone);
       const endLabel = formatTime(shift.time_out, profile.timezone)
         + (end.date !== shift.work_date ? ' (next day)' : '');
-      card.append(el('p', { className: 'record-meta', text: formatTime(shift.time_in, profile.timezone) + '–' + endLabel }));
+      card.append(el('p', { className: 'record-meta shift-time-range', text: formatTime(shift.time_in, profile.timezone) + ' - ' + endLabel }));
       card.append(el('p', { className: 'record-meta', text: 'Break: ' + Number(shift.break_minutes || 0) + ' min' }));
-      card.append(el('p', { className: 'record-meta', text: 'Worked: ' + formatWorkedMinutes(Number(shift.worked_minutes || 0)) }));
+      card.append(el('span', { className: 'worked-time-badge', text: formatWorkedMinutes(Number(shift.worked_minutes || 0)) }));
     }
     if (shift.is_overtime) card.append(el('span', { className: 'overtime-badge', text: 'Overtime' }));
     if (shift.notes) card.append(el('p', { className: 'record-notes', text: shift.notes }));
@@ -350,12 +352,8 @@ export function renderShiftsPage({ supabase, userId, profile }) {
     addButton.disabled = busy;
   }
 
+  page.append(addButton, renderEmployedNavigation('/employed/shifts'));
   return page;
-}
-
-function formatWorkedMinutes(minutes) {
-  const safeMinutes = Math.max(0, Math.floor(minutes));
-  return Math.floor(safeMinutes / 60) + 'h ' + String(safeMinutes % 60) + 'm';
 }
 
 function setMessage(element, text, kind) {

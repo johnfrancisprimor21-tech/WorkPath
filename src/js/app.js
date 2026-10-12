@@ -8,6 +8,9 @@ import { renderJobsPage } from './employed/jobs.js';
 import { renderShiftsPage } from './employed/shifts.js';
 import { renderApplicationsPage } from './job-seeker/applications.js';
 import { APPLICATION_STATUSES } from './job-seeker/helpers.js';
+import { renderSettingsPage } from './shared/settings.js';
+import { currentMonthInTimeZone } from './shared/time.js';
+import { fetchShiftMonth, summarizeShifts } from './employed/shift-summary.js';
 
 const root = document.getElementById('app');
 const PROFILE_COLUMNS = 'id, display_name, mode, currency, pay_frequency, timezone, onboarded';
@@ -213,6 +216,22 @@ function renderRoute() {
     return;
   }
 
+  if (route === '/settings') {
+    dashboardView = null;
+    try {
+      root.replaceChildren(renderSettingsPage(state.profile, {
+        onSaveSettings: saveSettings,
+        onLogout: logout
+      }));
+    } catch (error) {
+      renderProblem('Settings unavailable', error.message || 'We could not open your settings.', {
+        label: 'Return home',
+        action: () => navigate('/app')
+      });
+    }
+    return;
+  }
+
   if (route !== '/app') {
     navigate('/app', { replace: true });
     return;
@@ -223,9 +242,9 @@ function renderRoute() {
       notice: state.notice,
       noticeKind: state.noticeKind,
       onModeChange: changeMode,
-      onSaveSettings: saveSettings,
+      onOpenSettings: () => navigate('/settings'),
+      loadEmploymentSummary,
       loadApplicationSummary,
-      onLogout: logout
     };
     if (dashboardView?.element.parentElement === root) {
       dashboardView.updateMode(state.profile, state.notice, state.noticeKind);
@@ -249,6 +268,16 @@ async function loadApplicationSummary() {
     return [status || 'all', result.count || 0];
   });
   return Object.fromEntries(await Promise.all(queries));
+}
+
+async function loadEmploymentSummary() {
+  if (!state.session || !state.profile) throw new Error('Your session ended. Please sign in again.');
+  const shifts = await fetchShiftMonth(
+    supabase,
+    state.session.user.id,
+    currentMonthInTimeZone(state.profile.timezone)
+  );
+  return summarizeShifts(shifts);
 }
 
 async function submitAuthForm({ email, password, mode }) {

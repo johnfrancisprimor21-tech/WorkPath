@@ -14,6 +14,7 @@ import {
   isValidHttpUrl
 } from './helpers.js';
 import { renderJobSeekerNavigation } from './navigation.js';
+import { createIcon } from '../shared/icons.js';
 
 const APPLICATION_COLUMNS = 'id, company, position, source, job_url, location, date_applied, status, contact_name, contact_email, notes, updated_at';
 const EVENT_COLUMNS = 'id, application_id, event_type, event_date, notes';
@@ -34,8 +35,7 @@ const FILTERS = [
 ];
 
 export function renderApplicationsPage({ supabase, userId, profile }) {
-  const page = el('div', { className: 'page-wrap seeker-page' });
-  page.append(renderJobSeekerNavigation('/seeker/applications'));
+  const page = el('div', { className: 'page-wrap authenticated-page seeker-page' });
   const card = pageCard('My applications', 'Track applications and follow each one through its timeline.');
   page.append(card);
 
@@ -62,7 +62,10 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
 
   const latestNote = el('p', { className: 'muted-copy latest-note', text: 'Showing the latest 500 applications.' });
   latestNote.hidden = true;
-  const addButton = makeButton('Add an application', { className: 'button button-primary' });
+  const addButton = makeButton('', { className: 'button button-primary floating-add-button' });
+  addButton.setAttribute('aria-label', 'Add an application');
+  addButton.title = 'Add an application';
+  addButton.append(createIcon('plus'));
   const formSlot = el('div');
   const empty = el('section', { className: 'empty-state' }, [
     el('h2', { text: 'Add your first application' }),
@@ -74,7 +77,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
   const noMatches = el('p', { className: 'empty-filter-state', text: 'No applications match these filters.' });
   noMatches.hidden = true;
   const applicationList = el('div', { className: 'record-list application-list' });
-  card.append(message, eventWarning, tools, latestNote, addButton, formSlot, empty, noMatches, applicationList);
+  card.append(message, eventWarning, tools, latestNote, formSlot, empty, noMatches, applicationList);
 
   let applications = [];
   let selectedStatus = 'all';
@@ -86,6 +89,9 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
   });
   addButton.addEventListener('click', () => openApplicationForm());
   void loadApplications();
+  if (new URLSearchParams(window.location.hash.split('?')[1] || '').get('add') === '1') {
+    openApplicationForm();
+  }
 
   async function loadApplications() {
     setMessage(message, 'Loading applications…', 'loading');
@@ -133,15 +139,19 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
 
   function renderApplicationCard(application) {
     const item = el('article', { className: 'record-card application-card' });
-    const titleRow = el('div', { className: 'application-title-row' });
-    const heading = el('h2', { text: application.company });
+    const initials = application.company.trim().split(/\s+/).filter(Boolean).slice(0, 2)
+      .map((word) => Array.from(word)[0]).join('').toLocaleUpperCase();
+    const identity = el('div', { className: 'application-identity' }, [
+      el('h2', { text: application.company }),
+      el('p', { className: 'record-subtitle', text: application.position }),
+      el('p', { className: 'record-meta', text: 'Applied ' + formatDateLabel(application.date_applied) })
+    ]);
+    const avatar = el('div', { className: 'application-avatar', text: initials, attrs: { 'aria-hidden': 'true' } });
     const badge = el('span', {
       className: 'application-status-badge status-' + application.status,
       text: APPLICATION_STATUS_LABELS[application.status] || application.status
     });
-    titleRow.append(heading, badge);
-    item.append(titleRow, el('p', { className: 'record-subtitle', text: application.position }));
-    item.append(el('p', { className: 'record-meta', text: 'Applied ' + formatDateLabel(application.date_applied) }));
+    item.append(el('div', { className: 'application-card-heading' }, [avatar, identity, badge]));
     if (application.location) item.append(el('p', { className: 'record-meta', text: 'Location: ' + application.location }));
     if (application.source) item.append(el('p', { className: 'record-meta', text: 'Source: ' + application.source }));
 
@@ -190,7 +200,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
     details.append(el('summary', { text: 'Timeline' }));
     const status = el('p', { className: 'status-message', attrs: { role: 'status' } });
     const eventList = el('div', { className: 'timeline-list' });
-    const addEvent = makeButton('Add timeline event', { className: 'button button-secondary' });
+    const addEvent = makeButton('Add event', { className: 'button button-primary' });
     const formSlot = el('div');
     details.append(status, eventList, addEvent, formSlot);
 
@@ -601,6 +611,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
     return select;
   }
 
+  page.append(addButton, renderJobSeekerNavigation('/seeker/applications'));
   return page;
 }
 

@@ -122,6 +122,19 @@ export function formatDateLabel(date) {
   }).format(noonUtc);
 }
 
+export function formatShiftDateLabel(date, timeZone) {
+  const parts = parseDateTime(date, '12:00');
+  const noonUtc = new Date(Date.UTC(parts.year, parts.month - 1, parts.day, 12));
+  const values = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  }).formatToParts(noonUtc).map((part) => [part.type, part.value]));
+  return values.month + ' ' + values.day + ', ' + values.year + ' (' + values.weekday + ')';
+}
+
 export function formatMonthLabel(month) {
   const match = /^(\d{4})-(\d{2})$/.exec(month || '');
   if (!match) throw new Error('Enter a valid month.');
