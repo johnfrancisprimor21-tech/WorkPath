@@ -21,6 +21,7 @@ const state = {
 };
 
 let supabase;
+let dashboardView = null;
 let sessionVersion = 0;
 let restoringSession = true;
 let sawAuthEventDuringRestore = false;
@@ -171,13 +172,19 @@ function renderRoute() {
   }
 
   try {
-    root.replaceChildren(renderDashboard(state.profile, {
+    const dashboardOptions = {
       notice: state.notice,
       noticeKind: state.noticeKind,
       onModeChange: changeMode,
       onSaveSettings: saveSettings,
       onLogout: logout
-    }));
+    };
+    if (dashboardView?.element.parentElement === root) {
+      dashboardView.updateMode(state.profile, state.notice, state.noticeKind);
+    } else {
+      dashboardView = renderDashboard(state.profile, dashboardOptions);
+      root.replaceChildren(dashboardView.element);
+    }
   } catch (error) {
     renderProblem('Settings unavailable', error.message, { label: 'Log out', action: logout });
   }
@@ -218,11 +225,11 @@ async function changeMode(mode) {
     state.profile = await updateOwnProfile({ mode });
     state.notice = 'Mode updated. Your saved data stays in place.';
     state.noticeKind = 'success';
-    renderRoute();
+    dashboardView?.updateMode(state.profile, state.notice, state.noticeKind);
   } catch (error) {
     state.notice = error.message;
     state.noticeKind = 'error';
-    renderRoute();
+    dashboardView?.updateMode(state.profile, state.notice, state.noticeKind);
     throw error;
   }
 }
