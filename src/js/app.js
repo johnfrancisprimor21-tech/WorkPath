@@ -4,16 +4,16 @@ import { el, makeButton, pageCard } from './shared/dom.js';
 import { navigate, routeFromHash, watchRoutes } from './shared/router.js';
 import { renderOnboarding } from './onboarding/onboarding.js';
 import { getSupabaseClient } from './supabase.js';
+import { configureSupabaseRepo, getRepo } from './data/index.js';
 import { renderJobsPage } from './employed/jobs.js';
 import { renderShiftsPage } from './employed/shifts.js';
 import { renderApplicationsPage } from './job-seeker/applications.js';
-import { APPLICATION_STATUSES } from './job-seeker/helpers.js';
 import { renderSettingsPage } from './shared/settings.js';
 import { currentMonthInTimeZone } from './shared/time.js';
-import { fetchShiftMonth, summarizeShifts } from './employed/shift-summary.js';
+import { countApplicationStatuses, summarizeShifts } from './shared/aggregations.js';
+import { monthDateRange } from './shared/shift-summary.js';
 
 const root = document.getElementById('app');
-const PROFILE_COLUMNS = 'id, display_name, mode, currency, pay_frequency, timezone, onboarded';
 
 const state = {
   authReady: false,
@@ -36,6 +36,7 @@ let queuedRestoreSession = null;
 
 try {
   supabase = getSupabaseClient();
+  configureSupabaseRepo({ getUserId: () => state.session?.user?.id || null });
 } catch (error) {
   showFatalError(error.message);
 }
@@ -89,22 +90,12 @@ async function loadSession(session) {
   if (!session) return;
 
   try {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(PROFILE_COLUMNS)
-      .eq('id', session.user.id)
-      .maybeSingle();
+    const profile = await getRepo().profile.get();
     if (version !== sessionVersion) return;
-    if (error) {
-      state.profileError = profileFetchError(error);
-    } else if (!data) {
-      state.profileError = 'We could not find your profile. Sign out and sign in again, or contact support.';
-    } else {
-      state.profile = data;
-    }
-  } catch {
+    state.profile = profile;
+  } catch (error) {
     if (version !== sessionVersion) return;
-    state.profileError = 'We could not load your profile. Check your connection and try again.';
+    state.profileError = error.message || 'We could not load your profile. Check your connection and try again.';
   } finally {
     if (version === sessionVersion) {
       state.profileLoading = false;
@@ -184,7 +175,7 @@ function renderRoute() {
       return;
     }
     dashboardView = null;
-    const pageOptions = { supabase, userId: state.session.user.id, profile: state.profile };
+    const pageOptions = { repo: getRepo(), profile: state.profile };
     try {
       root.replaceChildren(route === '/employed/jobs'
         ? renderJobsPage(pageOptions)
@@ -204,7 +195,7 @@ function renderRoute() {
       return;
     }
     dashboardView = null;
-    const pageOptions = { supabase, userId: state.session.user.id, profile: state.profile };
+    const pageOptions = { repo: getRepo(), profile: state.profile };
     try {
       root.replaceChildren(renderApplicationsPage(pageOptions));
     } catch (error) {
@@ -259,24 +250,14 @@ function renderRoute() {
 
 async function loadApplicationSummary() {
   if (!state.session) throw new Error('Your session ended. Please sign in again.');
-  const userId = state.session.user.id;
-  const queries = [null, ...APPLICATION_STATUSES].map(async (status) => {
-    let query = supabase.from('applications').select('id', { count: 'exact', head: true }).eq('user_id', userId);
-    if (status) query = query.eq('status', status);
-    const result = await query;
-    if (result.error) throw result.error;
-    return [status || 'all', result.count || 0];
-  });
-  return Object.fromEntries(await Promise.all(queries));
+  const applications = await getRepo().applications.list();
+  return countApplicationStatuses(applications);
 }
 
 async function loadEmploymentSummary() {
   if (!state.session || !state.profile) throw new Error('Your session ended. Please sign in again.');
-  const shifts = await fetchShiftMonth(
-    supabase,
-    state.session.user.id,
-    currentMonthInTimeZone(state.profile.timezone)
-  );
+  const range = monthDateRange(currentMonthInTimeZone(state.profile.timezone));
+  const shifts = await getRepo().shifts.listBetween(range.fromDate, range.toDate);
   return summarizeShifts(shifts);
 }
 
@@ -331,15 +312,7 @@ async function saveSettings(values) {
 
 async function updateOwnProfile(values) {
   if (!state.session) throw new Error('Your session ended. Please sign in again.');
-  const { data, error } = await supabase
-    .from('profiles')
-    .update(values)
-    .eq('id', state.session.user.id)
-    .select(PROFILE_COLUMNS)
-    .maybeSingle();
-  if (error) throw new Error(profileSaveError(error));
-  if (!data) throw new Error('We could not find your profile to update. Please sign out and sign in again.');
-  return data;
+  return getRepo().profile.update(values);
 }
 
 async function logout() {
@@ -347,35 +320,6 @@ async function logout() {
   if (error) throw new Error('We could not log you out. Please try again.');
   state.pendingEmail = null;
   await loadSession(null);
-}
-
-function profileFetchError(error) {
-  const message = String(error?.message || '').toLowerCase();
-  if (message.includes('fetch') || message.includes('network')) {
-    return 'We could not load your profile. Check your connection and try again.';
-  }
-  return 'We could not load your profile. Refresh the page and try again.';
-}
-
-function profileSaveError(error) {
-  const code = String(error?.code || '').toLowerCase();
-  const message = String(error?.message || '').toLowerCase();
-  if (message.includes('profiles_onboarded_required_fields')) {
-    return 'Choose both a currency and a time zone before finishing setup.';
-  }
-  if (message.includes('profiles_currency_format')) {
-    return 'Choose a valid three-letter currency code.';
-  }
-  if (code === '23514') {
-    return 'Check the required profile details and try again.';
-  }
-  if (message.includes('fetch') || message.includes('network')) {
-    return 'We could not reach the database. Check your connection and try again.';
-  }
-  if (code === '42501' || message.includes('row-level security')) {
-    return 'We could not save these settings. Refresh the page and try again.';
-  }
-  return 'We could not save your profile. Check your choices and try again.';
 }
 
 function renderLoading(message) {

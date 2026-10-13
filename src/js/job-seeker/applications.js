@@ -9,15 +9,14 @@ import {
 import {
   APPLICATION_STATUSES,
   APPLICATION_STATUS_LABELS,
-  countApplicationStatuses,
   isValidEmail,
   isValidHttpUrl
 } from './helpers.js';
+import { countApplicationStatuses } from '../shared/aggregations.js';
+import { compareApplicationEvents, compareApplications } from '../data/contract.js';
 import { renderJobSeekerNavigation } from './navigation.js';
 import { createIcon } from '../shared/icons.js';
 
-const APPLICATION_COLUMNS = 'id, company, position, source, job_url, location, date_applied, status, contact_name, contact_email, notes, updated_at';
-const EVENT_COLUMNS = 'id, application_id, event_type, event_date, notes';
 const EVENT_TYPES = [
   ['interview', 'Interview'],
   ['follow_up', 'Follow up'],
@@ -34,7 +33,7 @@ const FILTERS = [
   ['no_response', 'No response']
 ];
 
-export function renderApplicationsPage({ supabase, userId, profile }) {
+export function renderApplicationsPage({ repo, profile }) {
   const page = el('div', { className: 'page-wrap authenticated-page seeker-page' });
   const card = pageCard('My applications', 'Track applications and follow each one through its timeline.');
   page.append(card);
@@ -97,14 +96,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
     setMessage(message, 'Loading applications…', 'loading');
     setPageButtonsBusy(true);
     try {
-      const { data, error } = await supabase
-        .from('applications')
-        .select(APPLICATION_COLUMNS)
-        .eq('user_id', userId)
-        .order('date_applied', { ascending: false })
-        .limit(500);
-      if (error) throw error;
-      applications = data || [];
+      applications = await repo.applications.list({ limit: 500 });
       latestNote.hidden = applications.length < 500;
       setMessage(message, '', 'status');
       renderApplications();
@@ -112,7 +104,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
       applications = [];
       applicationList.replaceChildren();
       empty.hidden = true;
-      setMessage(message, applicationError(error), 'error');
+      setMessage(message, error.message || 'We could not load or save applications. Check the details and try again.', 'error');
     } finally {
       setPageButtonsBusy(false);
     }
@@ -217,19 +209,12 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
       setMessage(status, 'Loading timeline…', 'loading');
       addEvent.disabled = true;
       try {
-        const { data, error } = await supabase
-          .from('application_events')
-          .select(EVENT_COLUMNS)
-          .eq('application_id', application.id)
-          .eq('user_id', userId)
-          .order('event_date', { ascending: false });
-        if (error) throw error;
-        events = data || [];
+        events = await repo.applicationEvents.listForApplication(application.id);
         loaded = true;
         setMessage(status, '', 'status');
         renderEvents();
       } catch (error) {
-        setMessage(status, eventError(error), 'error');
+        setMessage(status, error.message || 'We could not load or save this timeline event. Try again.', 'error');
       } finally {
         loading = false;
         addEvent.disabled = false;
@@ -242,7 +227,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
         eventList.append(el('p', { className: 'muted-copy', text: 'No timeline events yet.' }));
         return;
       }
-      for (const event of events) eventList.append(renderEvent(event));
+      for (const event of events.slice().reverse()) eventList.append(renderEvent(event));
     }
 
     function renderEvent(event) {
@@ -277,17 +262,11 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
       confirm.addEventListener('click', async () => {
         setPageButtonsBusy(true);
         try {
-          const { error } = await supabase
-            .from('application_events')
-            .delete()
-            .eq('id', event.id)
-            .eq('user_id', userId)
-            .eq('application_id', application.id);
-          if (error) throw error;
+          await repo.applicationEvents.remove(event.id);
           events = events.filter((entry) => entry.id !== event.id);
           renderEvents();
         } catch (error) {
-          setMessage(status, eventError(error), 'error');
+          setMessage(status, error.message || 'We could not load or save this timeline event. Try again.', 'error');
         } finally {
           setPageButtonsBusy(false);
         }
@@ -341,28 +320,24 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
         setFormBusy(form, true);
         try {
           const values = {
-              application_id: application.id,
-              user_id: userId,
-              event_type: eventType.value,
-              event_date: eventDate,
-              notes: noteText || null
+            application_id: application.id,
+            event_type: eventType.value,
+            event_date: eventDate,
+            notes: noteText || null
           };
-          const query = event
-            ? supabase.from('application_events').update(values).eq('id', event.id)
-              .eq('application_id', application.id).eq('user_id', userId)
-            : supabase.from('application_events').insert(values);
-          const { data, error } = await query.select(EVENT_COLUMNS).single();
-          if (error) throw error;
+          const saved = event
+            ? await repo.applicationEvents.update(event.id, values)
+            : await repo.applicationEvents.create(values);
           events = event
-            ? events.map((entry) => entry.id === event.id ? data : entry)
-            : [data, ...events];
-          events.sort((a, b) => Date.parse(b.event_date) - Date.parse(a.event_date));
+            ? events.map((entry) => entry.id === event.id ? saved : entry)
+            : [...events, saved];
+          events.sort(compareApplicationEvents);
           loaded = true;
           formSlot.replaceChildren();
           setMessage(status, '', 'status');
           renderEvents();
         } catch (error) {
-          feedback.textContent = eventError(error);
+          feedback.textContent = error.message || 'We could not load or save this timeline event. Try again.';
         } finally {
           setFormBusy(form, false);
           setPageButtonsBusy(false);
@@ -385,31 +360,13 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
     warning.hidden = true;
     select.disabled = true;
     try {
-      const { data, error } = await supabase
-        .from('applications')
-        .update({ status: nextStatus })
-        .eq('id', application.id)
-        .eq('user_id', userId)
-        .select('id')
-        .maybeSingle();
-      if (error) throw error;
-      if (!data) throw new Error('We could not find this application to update. Refresh the page and try again.');
-
-      application.status = nextStatus;
+      const result = await repo.applications.changeStatus(application.id, nextStatus);
+      application.status = result.application.status;
       badge.textContent = APPLICATION_STATUS_LABELS[nextStatus];
       badge.className = 'application-status-badge status-' + nextStatus;
       updateFilterButtons();
       applyFilters();
-      try {
-        const { error: eventInsertError } = await supabase.from('application_events').insert({
-          application_id: application.id,
-          user_id: userId,
-          event_type: 'status_changed',
-          event_date: new Date().toISOString(),
-          notes: previousStatus + ' -> ' + nextStatus
-        });
-        if (eventInsertError) throw eventInsertError;
-      } catch {
+      if (result.warning) {
         warning.textContent = 'Status saved, but its timeline event could not be added.';
         warning.hidden = false;
         eventWarning.textContent = 'An application status was saved, but its timeline event could not be added.';
@@ -419,7 +376,7 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
       if (view?.timeline.details.open) await view.timeline.loadEvents();
     } catch (error) {
       select.value = previousStatus;
-      warning.textContent = applicationError(error);
+      warning.textContent = error.message || 'We could not load or save applications. Check the details and try again.';
       warning.hidden = false;
     } finally {
       select.disabled = false;
@@ -513,33 +470,18 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
       try {
         let saved;
         if (application) {
-          const { data, error } = await supabase
-            .from('applications')
-            .update(values)
-            .eq('id', application.id)
-            .eq('user_id', userId)
-            .select(APPLICATION_COLUMNS)
-            .maybeSingle();
-          if (error) throw error;
-          if (!data) throw new Error('We could not find this application to update. Refresh the page and try again.');
-          saved = data;
+          saved = await repo.applications.update(application.id, values);
           applications = applications.map((entry) => entry.id === saved.id ? saved : entry)
-            .sort((a, b) => b.date_applied.localeCompare(a.date_applied))
+            .sort(compareApplications)
             .slice(0, 500);
         } else {
-          const { data, error } = await supabase
-            .from('applications')
-            .insert({ ...values, user_id: userId })
-            .select(APPLICATION_COLUMNS)
-            .single();
-          if (error) throw error;
-          saved = data;
-          applications = [saved, ...applications].sort((a, b) => b.date_applied.localeCompare(a.date_applied)).slice(0, 500);
+          saved = await repo.applications.create(values);
+          applications = [saved, ...applications].sort(compareApplications).slice(0, 500);
         }
         formSlot.replaceChildren();
         renderApplications();
       } catch (error) {
-        feedback.textContent = applicationError(error);
+        feedback.textContent = error.message || 'We could not load or save applications. Check the details and try again.';
       } finally {
         setFormBusy(form, false);
         setPageButtonsBusy(false);
@@ -576,16 +518,11 @@ export function renderApplicationsPage({ supabase, userId, profile }) {
     confirm.addEventListener('click', async () => {
       setPageButtonsBusy(true);
       try {
-        const { error } = await supabase
-          .from('applications')
-          .delete()
-          .eq('id', application.id)
-          .eq('user_id', userId);
-        if (error) throw error;
+        await repo.applications.remove(application.id);
         applications = applications.filter((entry) => entry.id !== application.id);
         renderApplications();
       } catch (error) {
-        setMessage(message, applicationError(error), 'error');
+        setMessage(message, error.message || 'We could not load or save applications. Check the details and try again.', 'error');
       } finally {
         setPageButtonsBusy(false);
       }
@@ -629,25 +566,4 @@ function setMessage(element, text, kind) {
 
 function setFormBusy(form, busy) {
   for (const control of form.querySelectorAll('input, select, textarea, button')) control.disabled = busy;
-}
-
-function eventError(error) {
-  const code = String(error?.code || '');
-  const message = String(error?.message || '').toLowerCase();
-  if (code === '23502') return 'Add the required event details and try again.';
-  if (code === '23503') return 'This application is no longer available.';
-  if (code === '42501' || message.includes('row-level security')) return 'You can only change events on your own applications.';
-  if (message.includes('fetch') || message.includes('network')) return 'We could not reach the database. Check your connection and try again.';
-  return 'We could not load or save this timeline event. Try again.';
-}
-
-function applicationError(error) {
-  if (error instanceof Error && !error.code && !error.message.includes('fetch')) return error.message;
-  const code = String(error?.code || '');
-  const message = String(error?.message || '').toLowerCase();
-  if (code === '23502') return 'Company, position, and date applied are required.';
-  if (code === '23503') return 'This record is no longer available.';
-  if (code === '42501' || message.includes('row-level security')) return 'You can only change your own applications.';
-  if (message.includes('fetch') || message.includes('network')) return 'We could not reach the database. Check your connection and try again.';
-  return 'We could not load or save applications. Check the details and try again.';
 }

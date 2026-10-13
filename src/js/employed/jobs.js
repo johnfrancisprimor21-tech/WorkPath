@@ -2,9 +2,7 @@ import { el, field, makeButton, pageCard } from '../shared/dom.js';
 import { todayInTimeZone } from '../shared/time.js';
 import { renderEmployedNavigation } from './navigation.js';
 
-const JOB_COLUMNS = 'id, employer_name, job_title, hourly_rate, start_date, end_date, is_current';
-
-export function renderJobsPage({ supabase, userId, profile }) {
+export function renderJobsPage({ repo, profile }) {
   const page = el('div', { className: 'page-wrap authenticated-page employed-page' });
 
   const card = pageCard('My jobs', 'Keep track of your current and past jobs.');
@@ -24,19 +22,12 @@ export function renderJobsPage({ supabase, userId, profile }) {
     setMessage(message, 'Loading jobs…', 'loading');
     addButton.disabled = true;
     try {
-      const { data, error } = await supabase
-        .from('employments')
-        .select(JOB_COLUMNS)
-        .eq('user_id', userId)
-        .order('is_current', { ascending: false })
-        .order('start_date', { ascending: false, nullsFirst: false });
-      if (error) throw error;
-      loadedJobs = data || [];
+      loadedJobs = await repo.employments.list();
       setMessage(message, '', 'status');
       renderList(loadedJobs);
     } catch (error) {
       list.replaceChildren();
-      setMessage(message, employmentError(error), 'error');
+      setMessage(message, error.message || 'We could not save this job. Check the details and try again.', 'error');
     } finally {
       addButton.disabled = false;
     }
@@ -161,15 +152,12 @@ export function renderJobsPage({ supabase, userId, profile }) {
       setPageButtonsBusy(true);
       setFormBusy(form, true);
       try {
-        const query = job
-          ? supabase.from('employments').update(values).eq('id', job.id).eq('user_id', userId)
-          : supabase.from('employments').insert({ ...values, user_id: userId });
-        const { error } = await query;
-        if (error) throw error;
+        if (job) await repo.employments.update(job.id, values);
+        else await repo.employments.create(values);
         formSlot.replaceChildren();
         await loadJobs();
       } catch (error) {
-        feedback.textContent = employmentError(error);
+        feedback.textContent = error.message || 'We could not save this job. Check the details and try again.';
       } finally {
         setFormBusy(form, false);
         setPageButtonsBusy(false);
@@ -187,15 +175,10 @@ export function renderJobsPage({ supabase, userId, profile }) {
     }
     setPageButtonsBusy(true);
     try {
-      const { error } = await supabase
-        .from('employments')
-        .update({ is_current: false, end_date: endDate })
-        .eq('id', job.id)
-        .eq('user_id', userId);
-      if (error) throw error;
+      await repo.employments.update(job.id, { is_current: false, end_date: endDate });
       await loadJobs();
     } catch (error) {
-      setMessage(message, employmentError(error), 'error');
+      setMessage(message, error.message || 'We could not save this job. Check the details and try again.', 'error');
     } finally {
       setPageButtonsBusy(false);
     }
@@ -213,15 +196,10 @@ export function renderJobsPage({ supabase, userId, profile }) {
     confirm.addEventListener('click', async () => {
       setPageButtonsBusy(true);
       try {
-        const { error } = await supabase
-          .from('employments')
-          .delete()
-          .eq('id', job.id)
-          .eq('user_id', userId);
-        if (error) throw error;
+        await repo.employments.remove(job.id);
         await loadJobs();
       } catch (error) {
-        setMessage(message, employmentError(error), 'error');
+        setMessage(message, error.message || 'We could not save this job. Check the details and try again.', 'error');
       } finally {
         setPageButtonsBusy(false);
       }
@@ -249,15 +227,4 @@ function setMessage(element, message, kind) {
 
 function setFormBusy(form, busy) {
   for (const control of form.querySelectorAll('input, button')) control.disabled = busy;
-}
-
-function employmentError(error) {
-  const code = String(error?.code || '');
-  const message = String(error?.message || '').toLowerCase();
-  if (code === '23514') return 'Check the job dates and hourly rate, then try again.';
-  if (code === '23502') return 'Employer name is required.';
-  if (code === '22003') return 'Hourly rate is too large. Enter a smaller amount.';
-  if (code === '42501' || message.includes('row-level security')) return 'You can only change your own jobs.';
-  if (message.includes('fetch') || message.includes('network')) return 'We could not reach the database. Check your connection and try again.';
-  return 'We could not save this job. Check the details and try again.';
 }

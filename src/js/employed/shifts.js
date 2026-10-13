@@ -12,9 +12,9 @@ import {
 } from '../shared/time.js';
 import { renderEmployedNavigation } from './navigation.js';
 import { createIcon } from '../shared/icons.js';
-import { fetchShiftMonth, formatWorkedMinutes, summarizeShifts } from './shift-summary.js';
+import { formatWorkedMinutes, summarizeShifts } from '../shared/aggregations.js';
+import { monthDateRange, shiftsNewestFirst } from '../shared/shift-summary.js';
 
-const JOB_COLUMNS = 'id, employer_name, job_title, start_date, is_current';
 const DAY_TYPES = [
   ['duty', 'Duty'],
   ['off', 'Off'],
@@ -23,7 +23,7 @@ const DAY_TYPES = [
   ['holiday', 'Holiday']
 ];
 
-export function renderShiftsPage({ supabase, userId, profile }) {
+export function renderShiftsPage({ repo, profile }) {
   const page = el('div', { className: 'page-wrap authenticated-page employed-page' });
   const card = pageCard('Shifts', 'Log work days, days off, and time worked.');
   page.append(card);
@@ -58,17 +58,10 @@ export function renderShiftsPage({ supabase, userId, profile }) {
     setMessage(message, 'Loading shifts…', 'loading');
     setControlsBusy(true);
     try {
-      const { data, error } = await supabase
-        .from('employments')
-        .select(JOB_COLUMNS)
-        .eq('user_id', userId)
-        .order('is_current', { ascending: false })
-        .order('start_date', { ascending: false, nullsFirst: false });
-      if (error) throw error;
-      jobs = data || [];
+      jobs = await repo.employments.list();
       await loadMonth();
     } catch (error) {
-      setMessage(message, shiftError(error), 'error');
+      setMessage(message, error.message || 'We could not load or save shifts. Check the details and try again.', 'error');
       list.replaceChildren();
       summary.replaceChildren();
     } finally {
@@ -80,7 +73,8 @@ export function renderShiftsPage({ supabase, userId, profile }) {
     setMessage(message, 'Loading shifts…', 'loading');
     setControlsBusy(true);
     try {
-      shifts = await fetchShiftMonth(supabase, userId, selectedMonth);
+      const range = monthDateRange(selectedMonth);
+      shifts = shiftsNewestFirst(await repo.shifts.listBetween(range.fromDate, range.toDate));
       monthHeading.textContent = formatMonthLabel(selectedMonth);
       renderSummary();
       renderList();
@@ -89,7 +83,7 @@ export function renderShiftsPage({ supabase, userId, profile }) {
       shifts = [];
       list.replaceChildren();
       summary.replaceChildren();
-      setMessage(message, shiftError(error), 'error');
+      setMessage(message, error.message || 'We could not load or save shifts. Check the details and try again.', 'error');
     } finally {
       setControlsBusy(false);
     }
@@ -295,15 +289,12 @@ export function renderShiftsPage({ supabase, userId, profile }) {
       setPageButtonsBusy(true);
       setFormBusy(form, true);
       try {
-        const query = shift
-          ? supabase.from('shifts').update(values).eq('id', shift.id).eq('user_id', userId)
-          : supabase.from('shifts').insert({ ...values, user_id: userId });
-        const { error } = await query;
-        if (error) throw error;
+        if (shift) await repo.shifts.update(shift.id, values);
+        else await repo.shifts.create(values);
         formSlot.replaceChildren();
         await loadMonth();
       } catch (error) {
-        feedback.textContent = shiftError(error);
+        feedback.textContent = error.message || 'We could not load or save shifts. Check the details and try again.';
       } finally {
         setFormBusy(form, false);
         setPageButtonsBusy(false);
@@ -331,11 +322,10 @@ export function renderShiftsPage({ supabase, userId, profile }) {
     confirm.addEventListener('click', async () => {
       setPageButtonsBusy(true);
       try {
-        const { error } = await supabase.from('shifts').delete().eq('id', shift.id).eq('user_id', userId);
-        if (error) throw error;
+        await repo.shifts.remove(shift.id);
         await loadMonth();
       } catch (error) {
-        setMessage(message, shiftError(error), 'error');
+        setMessage(message, error.message || 'We could not load or save shifts. Check the details and try again.', 'error');
       } finally {
         setPageButtonsBusy(false);
       }
@@ -365,15 +355,4 @@ function setMessage(element, text, kind) {
 
 function setFormBusy(form, busy) {
   for (const control of form.querySelectorAll('input, select, textarea, button')) control.disabled = busy;
-}
-
-function shiftError(error) {
-  const code = String(error?.code || '');
-  const message = String(error?.message || '').toLowerCase();
-  if (code === '23514') return 'Check the shift times, day type, and break length.';
-  if (code === '23503') return 'Choose one of your jobs or select no employer.';
-  if (code === '23502') return 'Add the required shift details and try again.';
-  if (code === '42501' || message.includes('row-level security')) return 'You can only change your own shifts.';
-  if (message.includes('fetch') || message.includes('network')) return 'We could not reach the database. Check your connection and try again.';
-  return 'We could not load or save shifts. Check the details and try again.';
 }

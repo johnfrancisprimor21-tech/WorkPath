@@ -3,7 +3,7 @@ import { createModeChoice } from './mode-choice.js';
 import { createIcon } from './icons.js';
 import { renderEmployedNavigation } from '../employed/navigation.js';
 import { renderJobSeekerNavigation } from '../job-seeker/navigation.js';
-import { formatWorkedMinutes } from '../employed/shift-summary.js';
+import { formatWorkedMinutes } from './aggregations.js';
 
 export function renderDashboard(profile, options) {
   const element = el('div', { className: 'page-wrap authenticated-page dashboard-page' });

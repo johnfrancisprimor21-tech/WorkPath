@@ -1,4 +1,6 @@
-export const APPLICATION_STATUSES = ['pending', 'interview', 'offer', 'rejected', 'no_response'];
+import { APPLICATION_STATUSES, countApplicationStatuses } from '../shared/aggregations.js';
+
+export { APPLICATION_STATUSES, countApplicationStatuses };
 export const APPLICATION_STATUS_LABELS = {
   pending: 'Pending',
   interview: 'Interview',
@@ -22,13 +24,4 @@ export function isValidEmail(value) {
   const text = String(value || '').trim();
   if (!text) return true;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
-}
-
-export function countApplicationStatuses(applications) {
-  const counts = { all: applications.length };
-  for (const status of APPLICATION_STATUSES) counts[status] = 0;
-  for (const application of applications) {
-    if (Object.hasOwn(counts, application.status) && application.status !== 'all') counts[application.status] += 1;
-  }
-  return counts;
 }

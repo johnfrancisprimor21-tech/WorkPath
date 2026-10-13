@@ -2,6 +2,10 @@
 
 Workpath is a mobile-first Vite app built with vanilla JavaScript and Supabase. It includes authentication, onboarding, and the first employed-mode tools for managing jobs and shifts.
 
+## Architecture
+
+Screens use the repository returned by `getRepo()` in `src/js/data/index.js`; only `src/js/data/` may access Supabase tables. The app's auth/session code continues to use Supabase Auth directly. The repository owns user scoping and converts backend errors to `DataError` messages, while pure summaries and worked-minute calculations live in `src/js/shared/`. A memory repository runs the shared repository contract tests. Later payroll and JSON import/export work can extend the same entity boundary without changing screen access patterns.
+
 ## Run the app
 
 1. Install dependencies:
@@ -39,7 +43,7 @@ Use a test email account in the Supabase project configured above.
 - `#/employed/shifts` lets you record duty days and days off, view monthly worked-time summaries, and edit or delete shifts.
 - `#/employed/jobs` lets you add, edit, end, and delete employments.
 
-Employed routes redirect to the dashboard while Job Seeker mode is selected. Shift hours are read from the `shifts_with_hours` database view. The app converts local times using the profile time zone, rejects skipped spring-forward times, and uses the first occurrence of repeated fall-back times.
+Employed routes redirect to the dashboard while Job Seeker mode is selected. The app reads shifts from the `shifts` table and computes worked minutes in JavaScript; the existing `shifts_with_hours` database view remains unchanged and unused. It converts local times using the profile time zone, rejects skipped spring-forward times, and uses the first occurrence of repeated fall-back times.
 
 ## Job seeker routes
 
@@ -50,7 +54,7 @@ The Job Seeker route redirects to the dashboard while Employed mode is selected.
 
 ## Verify the app
 
-Run the automated time conversion tests and production build:
+Run the automated tests and production build:
 
 ```sh
 npm test
@@ -60,14 +64,14 @@ npm run build
 Manual checklist (use an account set to Employed mode):
 
 1. Add a job with employer, optional title/rate, and dates. Edit it, then mark it ended and confirm its end date defaults to today in the profile time zone. Delete a job and confirm the inline message explains linked shifts will remain without the employer.
-2. Log a normal duty shift with a break and employer. Confirm it appears under the selected date with time, break, employer, and worked hours from the view. Edit it and save the change.
+2. Log a normal duty shift with a break and employer. Confirm it appears under the selected date with time, break, employer, and computed worked time. Edit it and save the change.
 3. Log an overnight shift from 10:00 pm to 6:00 am with a 60 minute break. Confirm the next-day hint appears and it shows `7h 0m` worked.
 4. Log an Off day and confirm time, break, and overtime controls are hidden. Also check Leave, Sick, and Holiday can be saved as non-duty days.
 5. Use previous/next month controls and confirm each month loads its own grouped shifts and summary. Delete a shift using the inline confirmation.
 6. Change to Job Seeker mode and confirm the employed links and employed routes are no longer available. Switch back and confirm jobs and shifts are still present. While in Job Seeker mode, open `#/employed/shifts` directly and confirm it redirects to `#/app`.
 7. Try the shift form on a New York spring-forward date at 2:30 am and confirm it asks for another time. On the fall-back repeated 1:30 am time, confirm it resolves to the first occurrence.
 
-Automated tests use Node's built-in test runner and cover Asia/Manila, New York daylight-saving transitions, and an overnight shift. No extra test dependencies are required.
+Automated tests use Node's built-in test runner and cover the repository contract and user isolation, the Supabase table-access boundary, worked-minute calculations, HTTP(S)-only links, optional email validation, application counts, Asia/Manila, New York daylight-saving transitions, and overnight shifts. No extra test dependencies are required.
 
 Manual checklist (use an account set to Job Seeker mode):
 
