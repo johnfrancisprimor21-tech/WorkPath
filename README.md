@@ -4,7 +4,7 @@ Workpath is a mobile-first Vite app built with vanilla JavaScript and Supabase. 
 
 ## Architecture
 
-Screens use the repository returned by `getRepo()` in `src/js/data/index.js`; only `src/js/data/` may access Supabase tables. The app's auth/session code continues to use Supabase Auth directly. The repository owns user scoping and converts backend errors to `DataError` messages, while pure summaries and worked-minute calculations live in `src/js/shared/`. A memory repository runs the shared repository contract tests. Later payroll and JSON import/export work can extend the same entity boundary without changing screen access patterns.
+Screens use the repository returned by `getRepo()` in `src/js/data/index.js`. Workpath supports account storage through Supabase and on-device storage through IndexedDB; the selected mode is saved in `localStorage` under `workpath.storageMode`. Local data stays on this device and is not merged with account data. Only `src/js/data/` may access Supabase tables or IndexedDB; the app's auth/session code uses Supabase Auth directly in account mode. Repositories own user scoping, validation, timestamp normalization, and friendly `DataError` messages, while pure summaries and worked-minute calculations live in `src/js/shared/`. Memory and IndexedDB repositories run the shared contract tests. Later payroll and JSON import/export work can extend the same entity boundary without changing screen access patterns.
 
 ## Run the app
 
@@ -71,7 +71,7 @@ Manual checklist (use an account set to Employed mode):
 6. Change to Job Seeker mode and confirm the employed links and employed routes are no longer available. Switch back and confirm jobs and shifts are still present. While in Job Seeker mode, open `#/employed/shifts` directly and confirm it redirects to `#/app`.
 7. Try the shift form on a New York spring-forward date at 2:30 am and confirm it asks for another time. On the fall-back repeated 1:30 am time, confirm it resolves to the first occurrence.
 
-Automated tests use Node's built-in test runner and cover the repository contract and user isolation, the Supabase table-access boundary, worked-minute calculations, HTTP(S)-only links, optional email validation, application counts, Asia/Manila, New York daylight-saving transitions, and overnight shifts. No extra test dependencies are required.
+Automated tests use Node's built-in test runner and fake-indexeddb to exercise the shared repository contract against memory and IndexedDB, including user isolation, timestamp normalization, storage cleanup, and the Supabase/IndexedDB access boundary. Other tests cover worked-minute calculations, HTTP(S)-only links, optional email validation, application counts, Asia/Manila, New York daylight-saving transitions, and overnight shifts.
 
 Manual checklist (use an account set to Job Seeker mode):
 

@@ -72,6 +72,7 @@ export function renderAuthScreen(options) {
     attrs: { href: isSignup ? '#/login' : '#/signup' }
   });
   card.append(el('p', { className: 'form-footer' }, [el('span', { text: switchText + ' ' }), switchLink]));
+  card.append(localModeChoice(options));
   return el('div', { className: 'page-wrap auth-page' }, [card]);
 }
 
@@ -85,8 +86,33 @@ function renderConfirmationScreen(options) {
   card.append(el('p', { className: 'muted-copy', text: 'Once confirmed, you can return here and sign in.' }));
   const button = makeButton('Back to sign in', { className: 'button button-primary button-wide' });
   button.addEventListener('click', () => options.onNavigate('/login'));
-  card.append(button);
+  card.append(button, localModeChoice(options));
   return el('div', { className: 'page-wrap auth-page' }, [card]);
+}
+
+function localModeChoice(options) {
+  const feedback = el('p', { className: 'status-message status-error', attrs: { role: 'alert' } });
+  feedback.hidden = true;
+  const button = makeButton(options.localProfileExists ? 'Continue on this device' : 'Use without an account', {
+    className: 'button button-secondary button-wide'
+  });
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    button.textContent = 'Opening local data…';
+    try {
+      await options.onUseLocal();
+    } catch (error) {
+      button.disabled = false;
+      button.textContent = options.localProfileExists ? 'Continue on this device' : 'Use without an account';
+      feedback.textContent = error.message || 'We could not open data on this device.';
+      feedback.hidden = false;
+    }
+  });
+  return el('section', { className: 'local-mode-choice' }, [
+    el('p', { className: 'muted-copy', text: 'Your data is saved only on this device. Clearing your browser data erases it.' }),
+    feedback,
+    button
+  ]);
 }
 
 export function authErrorMessage(error, mode) {

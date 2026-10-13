@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '../supabase.js';
 import { compareApplicationEvents } from './contract.js';
 import { DataError } from './errors.js';
+import { normalizeTimestamp } from './normalize-timestamp.js';
 import { computeWorkedMinutes } from '../shared/hours.js';
 
 /** Create the Supabase-backed implementation of the Workpath repository. */
@@ -66,7 +67,7 @@ export function createSupabaseRepo({ getUserId }) {
           supabase.from('profiles').select('*').eq('id', owner).maybeSingle(),
           'profile', 'read', 'We could not find your profile. Sign out and sign in again, or contact support.'
         );
-        return row;
+        return normalizeProfile(row);
       },
       async update(values) {
         const owner = userId();
@@ -74,7 +75,7 @@ export function createSupabaseRepo({ getUserId }) {
           supabase.from('profiles').update(withoutIdentity(values)).eq('id', owner).select('*').maybeSingle(),
           'profile', 'update', 'We could not find your profile to update. Please sign out and sign in again.'
         );
-        return row;
+        return normalizeProfile(row);
       }
     },
     employments: {
@@ -279,16 +280,25 @@ function normalizeEmployment(row) {
   return { ...row, hourly_rate: row.hourly_rate === null ? null : Number(row.hourly_rate) };
 }
 
+function normalizeProfile(row) {
+  return { ...row, created_at: normalizeTimestamp(row.created_at) };
+}
+
 function normalizeShift(row) {
-  return { ...row, worked_minutes: computeWorkedMinutes(row) };
+  const normalized = {
+    ...row,
+    time_in: normalizeTimestamp(row.time_in),
+    time_out: normalizeTimestamp(row.time_out)
+  };
+  return { ...normalized, worked_minutes: computeWorkedMinutes(normalized) };
 }
 
 function normalizeApplication(row) {
-  return row;
+  return { ...row, updated_at: normalizeTimestamp(row.updated_at) };
 }
 
 function normalizeApplicationEvent(row) {
-  return row;
+  return { ...row, event_date: normalizeTimestamp(row.event_date) };
 }
 
 function validateDateRange(fromDate, toDate) {

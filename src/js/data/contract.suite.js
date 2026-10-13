@@ -17,6 +17,40 @@ export function runContractTests(makeRepo) {
     assert.equal((await repo.profile.get()).display_name, 'Contract user');
   });
 
+  test('new profiles and records use the database defaults', async () => {
+    const repo = await makeRepo();
+    const profile = await repo.profile.get();
+    assert.equal(profile.mode, 'job_seeker');
+    assert.equal(profile.currency, null);
+    assert.equal(profile.pay_frequency, null);
+    assert.equal(profile.timezone, null);
+    assert.equal(profile.onboarded, false);
+
+    const employment = await repo.employments.create({ employer_name: 'Defaults Co' });
+    assert.equal(employment.job_title, null);
+    assert.equal(employment.hourly_rate, null);
+    assert.equal(employment.start_date, null);
+    assert.equal(employment.end_date, null);
+    assert.equal(employment.is_current, true);
+
+    const shift = await repo.shifts.create({ work_date: '2025-04-01' });
+    assert.equal(shift.employment_id, null);
+    assert.equal(shift.day_type, 'duty');
+    assert.equal(shift.time_in, null);
+    assert.equal(shift.time_out, null);
+    assert.equal(shift.break_minutes, 0);
+    assert.equal(shift.is_overtime, false);
+    assert.equal(shift.notes, null);
+
+    const application = await repo.applications.create({ company: 'Defaults Co', position: 'Role', date_applied: '2025-04-01' });
+    assert.equal(application.status, 'pending');
+    assert.equal(application.source, null);
+    const event = await repo.applicationEvents.create({
+      application_id: application.id, event_type: 'note', event_date: '2025-04-01T12:00:00Z'
+    });
+    assert.equal(event.notes, null);
+  });
+
   test('employments create, list order, update, remove, and set-null shift links', async () => {
     const repo = await makeRepo();
     const olderCurrent = await repo.employments.create({ employer_name: 'Older current', start_date: '2024-01-01' });
@@ -125,15 +159,94 @@ export function runContractTests(makeRepo) {
     const earlier = await repo.applicationEvents.create({ application_id: application.id, event_type: 'note', event_date: '2025-04-01T10:00:00.000Z' });
     assert.deepEqual((await repo.applicationEvents.listForApplication(application.id)).map((row) => row.id), [
       earlier.id,
-      ...[sameDateA.id, sameDateB.id].sort(),
-      fractionalEarlier.id,
-      fractionalLater.id,
+      ...[sameDateA.id, sameDateB.id, fractionalEarlier.id, fractionalLater.id].sort(),
       later.id
     ]);
     const updated = await repo.applicationEvents.update(later.id, { notes: 'Updated event' });
     assert.equal(updated.notes, 'Updated event');
     assert.equal(await repo.applicationEvents.remove(later.id), undefined);
     assert.equal((await repo.applicationEvents.listForApplication(application.id)).some((row) => row.id === later.id), false);
+  });
+
+  test('invalid entity values reject with validation errors', async () => {
+    const repo = await makeRepo();
+    await repo.profile.get();
+    await assert.rejects(
+      repo.profile.update({ onboarded: true }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.profile.update({ currency: 'usd' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.profile.update({ pay_frequency: 'yearly' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.profile.update({ mode: 'freelancer' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.employments.create({ employer_name: null }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.employments.create({ employer_name: 'Invalid rate', hourly_rate: 100000000 }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.employments.create({ employer_name: 'Invalid dates', start_date: '2025-05-01', end_date: '2025-04-01' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.shifts.create({ work_date: '2025-04-01', break_minutes: -1 }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.shifts.create({ work_date: '2025-04-01', break_minutes: 2_147_483_648 }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.shifts.create({ work_date: '2025-04-01', day_type: 'vacation' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.shifts.create({ work_date: '2025-04-01', time_in: '2025-04-01T10:00:00Z', time_out: '2025-04-01T09:00:00Z' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    await assert.rejects(
+      repo.applications.create({ company: 'Invalid', position: 'Role', date_applied: '2025-04-01', status: 'unknown' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+    const application = await repo.applications.create({ company: 'Valid', position: 'Role', date_applied: '2025-04-01' });
+    await assert.rejects(
+      repo.applicationEvents.create({ application_id: application.id, event_type: '', event_date: '2025-04-01T00:00:00Z' }),
+      (error) => error instanceof DataError && error.code === 'validation'
+    );
+  });
+
+  test('repository timestamps are normalized ISO UTC strings ending in Z', async () => {
+    const repo = await makeRepo();
+    const profile = await repo.profile.get();
+    assertIsoUtc(profile.created_at);
+    const shift = await repo.shifts.create({
+      work_date: '2025-04-01',
+      time_in: '2025-04-01T08:00:00+08:00',
+      time_out: '2025-04-01T16:00:00+08:00'
+    });
+    assertIsoUtc(shift.time_in);
+    assertIsoUtc(shift.time_out);
+    assert.equal(shift.time_in, '2025-04-01T00:00:00.000Z');
+    const application = await repo.applications.create({ company: 'UTC Co', position: 'Role', date_applied: '2025-04-01' });
+    assertIsoUtc(application.updated_at);
+    const event = await repo.applicationEvents.create({
+      application_id: application.id,
+      event_type: 'note',
+      event_date: '2025-04-01T12:00:00+08:00'
+    });
+    assertIsoUtc(event.event_date);
+    assert.equal(event.event_date, '2025-04-01T04:00:00.000Z');
   });
 
   if (typeof makeRepo.createStore === 'function') {
@@ -180,4 +293,8 @@ export function runContractTests(makeRepo) {
   } else {
     test('repository scopes reads and writes to the current user', { skip: 'This repository factory does not model multiple users.' }, () => {});
   }
+}
+
+function assertIsoUtc(value) {
+  assert.match(value, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
 }

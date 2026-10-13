@@ -6,11 +6,20 @@ import {
 } from './contract.js';
 import { DataError } from './errors.js';
 import { computeWorkedMinutes } from '../shared/hours.js';
-
-const USER_MODES = new Set(['employed', 'job_seeker']);
-const PAY_FREQUENCIES = new Set(['weekly', 'biweekly', 'semi_monthly', 'monthly']);
-const DAY_TYPES = new Set(['duty', 'off', 'leave', 'sick', 'holiday']);
-const APPLICATION_STATUSES = new Set(['pending', 'interview', 'offer', 'rejected', 'no_response']);
+import { normalizeTimestamp } from './normalize-timestamp.js';
+import {
+  APPLICATION_DEFAULTS,
+  EMPLOYMENT_DEFAULTS,
+  PROFILE_DEFAULTS,
+  SHIFT_DEFAULTS,
+  normalizeHourlyRate,
+  validateApplication,
+  validateApplicationEvent,
+  validateDateRange,
+  validateEmployment,
+  validateProfile,
+  validateShift
+} from './validation.js';
 
 export function createMemoryStore() {
   return {
@@ -29,13 +38,8 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
     if (!id) throw new DataError('permission', 'Your session ended. Please sign in again.');
     if (!store.profiles.some((profile) => profile.id === id)) {
       store.profiles.push({
+        ...PROFILE_DEFAULTS,
         id,
-        display_name: null,
-        mode: 'job_seeker',
-        currency: null,
-        pay_frequency: null,
-        timezone: null,
-        onboarded: false,
         created_at: new Date().toISOString()
       });
     }
@@ -69,11 +73,12 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
   async function createApplicationEvent(input) {
     const owner = userId();
     const values = withoutIdentity(input);
-    checkApplicationReference(values.application_id);
     validateApplicationEvent(values);
+    checkApplicationReference(values.application_id);
+    const candidate = normalizeEventValues(values);
     const row = {
       notes: null,
-      ...values,
+      ...candidate,
       id: newId(),
       user_id: owner
     };
@@ -95,18 +100,7 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         if (!row) throw new DataError('not_found', 'We could not find your profile to update. Please sign out and sign in again.');
         const updates = withoutIdentity(values);
         const candidate = { ...row, ...updates };
-        if (candidate.mode != null && !USER_MODES.has(candidate.mode)) {
-          throw new DataError('validation', 'Choose one of the available work modes.');
-        }
-        if (candidate.pay_frequency != null && !PAY_FREQUENCIES.has(candidate.pay_frequency)) {
-          throw new DataError('validation', 'Check the required profile details and try again.');
-        }
-        if (candidate.currency != null && !/^[A-Z]{3}$/.test(candidate.currency)) {
-          throw new DataError('validation', 'Choose a valid three-letter currency code.');
-        }
-        if (candidate.onboarded && (!candidate.currency || !candidate.timezone)) {
-          throw new DataError('validation', 'Choose both a currency and a time zone before finishing setup.');
-        }
+        validateProfile(candidate);
         Object.assign(row, updates);
         return copy(row);
       }
@@ -120,17 +114,11 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
       async create(input) {
         const owner = userId();
         const values = withoutIdentity(input);
-        if (!String(values.employer_name || '').trim()) {
-          throw new DataError('validation', 'Employer name is required.');
-        }
-        validateRate(values.hourly_rate);
+        const candidate = { ...EMPLOYMENT_DEFAULTS, ...values };
+        validateEmployment(candidate);
+        candidate.hourly_rate = normalizeHourlyRate(candidate.hourly_rate);
         const row = {
-          job_title: null,
-          hourly_rate: null,
-          start_date: null,
-          end_date: null,
-          is_current: true,
-          ...values,
+          ...candidate,
           id: newId(),
           user_id: owner
         };
@@ -141,14 +129,8 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         const row = ownRecord(store.employments, id, 'employment');
         const values = withoutIdentity(input);
         const candidate = { ...row, ...values };
-        if (!String(candidate.employer_name || '').trim()) {
-          throw new DataError('validation', 'Employer name is required.');
-        }
-        validateRate(candidate.hourly_rate);
-        if (candidate.start_date && candidate.end_date && candidate.end_date < candidate.start_date) {
-          throw new DataError('validation', 'Check the job dates and hourly rate, then try again.');
-        }
-        Object.assign(row, values);
+        validateEmployment(candidate);
+        Object.assign(row, values, values.hourly_rate === undefined ? {} : { hourly_rate: normalizeHourlyRate(values.hourly_rate) });
         return normalizeEmployment(row);
       },
       async remove(id) {
@@ -171,20 +153,10 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
       async create(input) {
         const owner = userId();
         const values = withoutDerived(input);
-        const row = {
-          employment_id: null,
-          day_type: 'duty',
-          time_in: null,
-          time_out: null,
-          break_minutes: 0,
-          is_overtime: false,
-          notes: null,
-          ...values,
-          id: newId(),
-          user_id: owner
-        };
-        validateShift(row);
-        checkEmploymentReference(row.employment_id);
+        const candidate = { ...SHIFT_DEFAULTS, ...values };
+        validateShift(candidate);
+        checkEmploymentReference(candidate.employment_id);
+        const row = { ...normalizeShiftValues(candidate), id: newId(), user_id: owner };
         store.shifts.push(row);
         return normalizeShift(row);
       },
@@ -194,7 +166,8 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         const candidate = { ...row, ...values };
         validateShift(candidate);
         checkEmploymentReference(candidate.employment_id);
-        Object.assign(row, values);
+        const normalizedValues = normalizeShiftValues(values);
+        Object.assign(row, normalizedValues);
         return normalizeShift(row);
       },
       async remove(id) {
@@ -217,13 +190,7 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         const owner = userId();
         const values = withoutIdentity(input);
         const row = {
-          source: null,
-          job_url: null,
-          location: null,
-          status: 'pending',
-          contact_name: null,
-          contact_email: null,
-          notes: null,
+          ...APPLICATION_DEFAULTS,
           ...values,
           id: newId(),
           user_id: owner,
@@ -250,7 +217,7 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
       },
       async changeStatus(id, newStatus) {
         const current = ownRecord(store.applications, id, 'application', 'We could not find this application to update. Refresh the page and try again.');
-        if (!APPLICATION_STATUSES.has(newStatus)) throw new DataError('validation', 'Choose a valid application status.');
+        validateApplication({ ...current, status: newStatus });
         if (current.status === newStatus) return { application: copy(current), warning: false };
         const previousStatus = current.status;
         const values = { status: newStatus };
@@ -282,9 +249,10 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         const row = ownRecord(store.applicationEvents, id, 'application_event', 'We could not find this timeline event to update. Refresh the page and try again.');
         const values = withoutIdentity(input);
         const candidate = { ...row, ...values };
-        checkApplicationReference(candidate.application_id);
         validateApplicationEvent(candidate);
-        Object.assign(row, values);
+        checkApplicationReference(candidate.application_id);
+        const normalizedValues = normalizeEventValues(values);
+        Object.assign(row, normalizedValues);
         return copy(row);
       },
       async remove(id) {
@@ -318,43 +286,18 @@ function withoutDerived(input = {}) {
   return values;
 }
 
-function validateRate(rate) {
-  if (rate == null || rate === '') return;
-  const value = Number(rate);
-  if (!Number.isFinite(value) || value < 0 || value > 99999999.99) {
-    throw new DataError('validation', 'Hourly rate is too large. Enter a smaller amount.');
-  }
+function normalizeShiftValues(values) {
+  const normalized = { ...values };
+  if ('time_in' in normalized) normalized.time_in = normalizeTimestamp(normalized.time_in);
+  if ('time_out' in normalized) normalized.time_out = normalizeTimestamp(normalized.time_out);
+  if ('break_minutes' in normalized) normalized.break_minutes = Number(normalized.break_minutes);
+  return normalized;
 }
 
-function validateShift(shift) {
-  if (!shift.work_date) throw new DataError('validation', 'Add the required shift details and try again.');
-  if (!DAY_TYPES.has(shift.day_type)) throw new DataError('validation', 'Check the shift times, day type, and break length.');
-  if (!Number.isInteger(Number(shift.break_minutes)) || Number(shift.break_minutes) < 0) {
-    throw new DataError('validation', 'Check the shift times, day type, and break length.');
-  }
-  if (shift.time_in && shift.time_out && Date.parse(shift.time_out) <= Date.parse(shift.time_in)) {
-    throw new DataError('validation', 'Check the shift times, day type, and break length.');
-  }
-}
-
-function validateApplication(application) {
-  if (!application.company || !application.position || !application.date_applied) {
-    throw new DataError('validation', 'Company, position, and date applied are required.');
-  }
-  if (!APPLICATION_STATUSES.has(application.status)) throw new DataError('validation', 'Choose a valid application status.');
-}
-
-function validateApplicationEvent(event) {
-  if (!event.application_id || !event.event_type || !event.event_date || !Number.isFinite(Date.parse(event.event_date))) {
-    throw new DataError('validation', 'Add the required event details and try again.');
-  }
-}
-
-function validateDateRange(fromDate, toDate) {
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-  if (!datePattern.test(String(fromDate)) || !datePattern.test(String(toDate)) || fromDate > toDate) {
-    throw new DataError('validation', 'Choose a valid inclusive date range.');
-  }
+function normalizeEventValues(values) {
+  const normalized = { ...values };
+  if ('event_date' in normalized) normalized.event_date = normalizeTimestamp(normalized.event_date);
+  return normalized;
 }
 
 function missingMessage(kind) {

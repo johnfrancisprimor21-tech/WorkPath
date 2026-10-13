@@ -4,7 +4,15 @@ import { el, makeButton, pageCard } from './shared/dom.js';
 import { navigate, routeFromHash, watchRoutes } from './shared/router.js';
 import { renderOnboarding } from './onboarding/onboarding.js';
 import { getSupabaseClient } from './supabase.js';
-import { configureSupabaseRepo, getRepo } from './data/index.js';
+import {
+  clearRepo,
+  configureIndexedDbRepo,
+  configureSupabaseRepo,
+  getRepo,
+  getStorageMode,
+  setStorageMode
+} from './data/index.js';
+import { hasLocalProfile } from './data/indexeddb-repo.js';
 import { renderJobsPage } from './employed/jobs.js';
 import { renderShiftsPage } from './employed/shifts.js';
 import { renderApplicationsPage } from './job-seeker/applications.js';
@@ -16,6 +24,9 @@ import { monthDateRange } from './shared/shift-summary.js';
 const root = document.getElementById('app');
 
 const state = {
+  storageMode: getStorageMode(),
+  localProfileExists: false,
+  storageProtected: false,
   authReady: false,
   authError: null,
   session: null,
@@ -28,22 +39,48 @@ const state = {
 };
 
 let supabase;
+let authSubscription = null;
+let localRepo = null;
 let dashboardView = null;
 let sessionVersion = 0;
 let restoringSession = true;
 let sawAuthEventDuringRestore = false;
 let queuedRestoreSession = null;
 
-try {
-  supabase = getSupabaseClient();
-  configureSupabaseRepo({ getUserId: () => state.session?.user?.id || null });
-} catch (error) {
-  showFatalError(error.message);
+watchRoutes(renderRoute);
+void initializeStorageMode();
+
+async function initializeStorageMode() {
+  if (state.storageMode === 'local') {
+    await initializeLocalMode();
+    return;
+  }
+  await initializeAccountMode();
 }
 
-if (supabase) {
-  watchRoutes(renderRoute);
-  supabase.auth.onAuthStateChange((event, session) => {
+async function initializeAccountMode() {
+  renderLoading('Restoring your session…');
+  try {
+    state.localProfileExists = await hasLocalProfile();
+    setupAccountAuth();
+    await restoreSession();
+  } catch (error) {
+    restoringSession = false;
+    if (String(error.message || '').startsWith('Missing Supabase configuration:')) {
+      showFatalError(error.message);
+      return;
+    }
+    state.authReady = true;
+    state.authError = error.message || 'The app could not start.';
+    renderRoute();
+  }
+}
+
+function setupAccountAuth() {
+  supabase = getSupabaseClient();
+  configureSupabaseRepo({ getUserId: () => state.session?.user?.id || null });
+  if (authSubscription) return;
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
     if (restoringSession) {
       sawAuthEventDuringRestore = true;
       queuedRestoreSession = session;
@@ -55,8 +92,87 @@ if (supabase) {
     }
     state.session = session;
   });
+  authSubscription = data?.subscription || null;
+}
 
-  void restoreSession();
+async function initializeLocalMode() {
+  state.storageMode = 'local';
+  restoringSession = false;
+  state.authReady = false;
+  state.authError = null;
+  renderLoading('Opening data on this device…');
+  authSubscription?.unsubscribe();
+  authSubscription = null;
+  try {
+    await supabase?.auth.stopAutoRefresh?.();
+  } catch {
+    // A previously active account client should stay idle while local mode is open.
+  }
+  try {
+    localRepo = configureIndexedDbRepo({ getUserId: () => state.session?.user?.id || null });
+    const id = await localRepo.getOrCreateLocalUserId();
+    state.session = { user: { id }, storageMode: 'local' };
+    await initializeStoragePersistence(localRepo);
+    await loadLocalProfile();
+  } catch (error) {
+    state.authReady = true;
+    state.profileLoading = false;
+    state.authError = error.message || 'We could not open data saved on this device.';
+    renderRoute();
+  }
+}
+
+async function initializeStoragePersistence(repo) {
+  let protection = { requested: false, protected: false };
+  try {
+    protection = await repo.storage.getPersistenceState();
+    if (!protection.requested) {
+      const shouldRequest = await repo.storage.markPersistenceRequested();
+      if (shouldRequest) {
+        let granted = false;
+        try {
+          granted = Boolean(await globalThis.navigator?.storage?.persist?.());
+        } catch {
+          granted = false;
+        }
+        await repo.storage.setPersistenceProtected(granted);
+        protection = { requested: true, protected: granted };
+      }
+    } else if (globalThis.navigator?.storage?.persisted) {
+      protection = {
+        ...protection,
+        protected: Boolean(await globalThis.navigator.storage.persisted().catch(() => false)) || protection.protected
+      };
+    }
+  } catch {
+    protection = { requested: true, protected: false };
+  }
+  state.storageProtected = Boolean(protection.protected);
+}
+
+async function loadLocalProfile() {
+  const version = ++sessionVersion;
+  state.authReady = true;
+  state.authError = null;
+  state.profile = null;
+  state.profileError = null;
+  state.profileLoading = true;
+  state.notice = null;
+  renderRoute();
+  try {
+    const profile = await getRepo().profile.get();
+    if (version !== sessionVersion) return;
+    state.profile = profile;
+    state.localProfileExists = true;
+  } catch (error) {
+    if (version !== sessionVersion) return;
+    state.profileError = error.message || 'We could not load data saved on this device.';
+  } finally {
+    if (version === sessionVersion) {
+      state.profileLoading = false;
+      renderRoute();
+    }
+  }
 }
 
 async function restoreSession() {
@@ -105,16 +221,26 @@ async function loadSession(session) {
 }
 
 function renderRoute() {
-  if (!root || !supabase) return;
+  if (!root) return;
   if (!state.authReady || state.profileLoading) {
     renderLoading(state.profileLoading ? 'Loading your profile…' : 'Restoring your session…');
     return;
   }
   if (state.authError) {
-    renderProblem('Session unavailable', state.authError, {
-      label: 'Refresh page',
-      action: () => window.location.reload()
-    });
+    if (state.storageMode === 'local') {
+      renderProblem('Local data unavailable', state.authError, {
+        label: 'Try again',
+        action: () => { void initializeLocalMode(); }
+      }, {
+        label: 'Sign in or create an account',
+        action: switchToAccountAuth
+      });
+    } else {
+      renderProblem('Session unavailable', state.authError, {
+        label: 'Refresh page',
+        action: () => window.location.reload()
+      });
+    }
     return;
   }
 
@@ -127,7 +253,9 @@ function renderRoute() {
     root.replaceChildren(renderAuthScreen({
       mode: route.slice(1),
       confirmationEmail: route === '/signup' ? state.pendingEmail : null,
+      localProfileExists: state.localProfileExists,
       onSubmit: submitAuthForm,
+      onUseLocal: switchToLocalMode,
       onConfirmation: (email) => {
         state.pendingEmail = email;
         renderRoute();
@@ -211,8 +339,12 @@ function renderRoute() {
     dashboardView = null;
     try {
       root.replaceChildren(renderSettingsPage(state.profile, {
+        storageMode: state.storageMode,
+        storageProtected: state.storageProtected,
         onSaveSettings: saveSettings,
-        onLogout: logout
+        onLogout: logout,
+        onSwitchToAccount: switchToAccountAuth,
+        onDeleteLocalData: deleteAllLocalData
       }));
     } catch (error) {
       renderProblem('Settings unavailable', error.message || 'We could not open your settings.', {
@@ -262,6 +394,7 @@ async function loadEmploymentSummary() {
 }
 
 async function submitAuthForm({ email, password, mode }) {
+  setupAccountAuth();
   if (mode === 'signup') {
     const { data, error } = await supabase.auth.signUp({
       email,
@@ -315,7 +448,65 @@ async function updateOwnProfile(values) {
   return getRepo().profile.update(values);
 }
 
+async function switchToLocalMode() {
+  setStorageMode('local');
+  state.storageMode = 'local';
+  state.session = null;
+  state.profile = null;
+  state.profileLoading = false;
+  state.profileError = null;
+  state.authError = null;
+  state.pendingEmail = null;
+  state.notice = null;
+  await initializeLocalMode();
+}
+
+function switchToAccountAuth() {
+  authSubscription?.unsubscribe();
+  authSubscription = null;
+  localRepo?.close();
+  localRepo = null;
+  setStorageMode('account');
+  state.storageMode = 'account';
+  state.session = null;
+  state.profile = null;
+  state.profileLoading = false;
+  state.profileError = null;
+  state.authError = null;
+  state.authReady = true;
+  state.pendingEmail = null;
+  state.notice = null;
+  clearRepo();
+  navigate('/login', { replace: true });
+  renderRoute();
+}
+
+async function deleteAllLocalData() {
+  if (!localRepo) throw new Error('Local storage is unavailable. Refresh the page and try again.');
+  await localRepo.deleteDatabase();
+  localRepo = null;
+  clearRepo();
+  setStorageMode(null);
+  state.storageMode = 'account';
+  state.localProfileExists = false;
+  state.session = null;
+  state.profile = null;
+  state.profileLoading = false;
+  state.profileError = null;
+  state.authError = null;
+  state.authReady = true;
+  state.pendingEmail = null;
+  state.notice = null;
+  navigate('/login', { replace: true });
+  renderRoute();
+}
+
 async function logout() {
+  if (state.storageMode === 'local') {
+    switchToAccountAuth();
+    return;
+  }
+  if (!supabase) throw new Error('We could not log you out. Please try again.');
   const { error } = await supabase.auth.signOut();
   if (error) throw new Error('We could not log you out. Please try again.');
   state.pendingEmail = null;
@@ -355,9 +546,3 @@ function showFatalError(message) {
   }));
   root.replaceChildren(el('div', { className: 'page-wrap auth-page' }, [card]));
 }
-
-function startRoute() {
-  renderRoute();
-}
-
-startRoute();
