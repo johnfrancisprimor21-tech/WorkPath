@@ -4,6 +4,7 @@ import { createIcon } from '../shared/icons.js';
 const ITEMS = [
   ['/app', 'Home', 'home'],
   ['/employed/shifts', 'Shifts', 'calendar'],
+  ['/employed/pay', 'Pay', 'pay'],
   ['/employed/jobs', 'Jobs', 'jobs']
 ];
 

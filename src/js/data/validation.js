@@ -42,6 +42,17 @@ export const APPLICATION_DEFAULTS = Object.freeze({
   notes: null
 });
 
+export const PAYROLL_ENTRY_DEFAULTS = Object.freeze({
+  employment_id: null,
+  period_start: null,
+  period_end: null,
+  gross: null,
+  deductions: 0,
+  notes: null
+});
+
+const MAX_PAYROLL_AMOUNT = 9_999_999_999.99;
+
 export function validateProfile(profile) {
   if (!USER_MODES.has(profile.mode)) {
     throw new DataError('validation', 'Choose one of the available work modes.');
@@ -140,6 +151,30 @@ export function validateApplicationEvent(event) {
   }
 }
 
+export function validatePayrollEntry(entry) {
+  if (!isDateOnly(entry.pay_date)) {
+    throw new DataError('validation', 'Enter a valid pay date.');
+  }
+  if ((entry.period_start != null && !isDateOnly(entry.period_start))
+      || (entry.period_end != null && !isDateOnly(entry.period_end))) {
+    throw new DataError('validation', 'Check the pay period dates.');
+  }
+  if (entry.period_start && entry.period_end && entry.period_end < entry.period_start) {
+    throw new DataError('validation', 'Check the pay period dates.');
+  }
+  validatePayrollAmount(entry.net, 'net');
+  if (entry.gross != null) validatePayrollAmount(entry.gross, 'gross');
+  validatePayrollAmount(entry.deductions, 'deductions');
+}
+
+export function normalizePayrollAmount(value) {
+  if (value == null || value === '') return null;
+  let numeric;
+  try { numeric = Number(value); } catch { return Number.NaN; }
+  if (!Number.isFinite(numeric)) return numeric;
+  return Math.round((numeric + Number.EPSILON) * 100) / 100;
+}
+
 export function validateDateRange(fromDate, toDate) {
   if (!isDateOnly(fromDate) || !isDateOnly(toDate) || fromDate > toDate) {
     throw new DataError('validation', 'Choose a valid inclusive date range.');
@@ -160,4 +195,19 @@ export function isDateOnly(value) {
 function isTimestamp(value) {
   return (typeof value === 'string' || value instanceof Date)
     && Number.isFinite(Date.parse(value));
+}
+
+function validatePayrollAmount(value, kind) {
+  const numeric = normalizePayrollAmount(value);
+  if (numeric == null || !Number.isFinite(numeric) || numeric < 0) {
+    const message = kind === 'net'
+      ? 'Enter a valid net amount of zero or more.'
+      : kind === 'deductions'
+        ? 'Enter valid deductions of zero or more.'
+        : 'Enter valid gross pay of zero or more.';
+    throw new DataError('validation', message);
+  }
+  if (numeric > MAX_PAYROLL_AMOUNT) {
+    throw new DataError('validation', 'Pay amounts must not exceed 9,999,999,999.99.');
+  }
 }

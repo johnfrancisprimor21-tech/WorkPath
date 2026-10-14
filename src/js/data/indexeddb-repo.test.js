@@ -71,6 +71,56 @@ test('blocked database deletion asks the user to close other Workpath tabs', asy
   await deleteIndexedDbDatabase(databaseName);
 });
 
+test('version 1 local data survives the version 2 payroll store upgrade', async () => {
+  const databaseName = `workpath-local-upgrade-${++sequence}`;
+  databaseNames.add(databaseName);
+  const localUserId = '00000000-0000-4000-8000-000000000091';
+  await createVersionOneDatabase(databaseName, localUserId);
+
+  const repo = createIndexedDbRepo({ getUserId: () => localUserId, databaseName });
+  repos.push(repo);
+  const profile = await repo.profile.get();
+  const employments = await repo.employments.list();
+  const payrollEntries = await repo.payrollEntries.list();
+  assert.equal(profile.display_name, 'Before upgrade');
+  assert.equal(employments[0].employer_name, 'Old job');
+  assert.deepEqual(payrollEntries, []);
+
+  const upgraded = await openDatabase(databaseName);
+  assert.equal(upgraded.version, 2);
+  assert.equal(upgraded.objectStoreNames.contains('payroll_entries'), true);
+  assert.equal(upgraded.transaction('payroll_entries').objectStore('payroll_entries').indexNames.contains('user_id_pay_date'), true);
+  upgraded.close();
+});
+
+function createVersionOneDatabase(databaseName, userId) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(databaseName, 1);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      db.createObjectStore('profiles', { keyPath: 'id' }).put({
+        id: userId, display_name: 'Before upgrade', mode: 'employed', currency: 'USD',
+        pay_frequency: 'weekly', timezone: 'UTC', onboarded: true, created_at: '2025-01-01T00:00:00.000Z'
+      });
+      const employments = db.createObjectStore('employments', { keyPath: 'id' });
+      employments.createIndex('user_id', 'user_id');
+      employments.put({ id: 'old-job', user_id: userId, employer_name: 'Old job', is_current: true, hourly_rate: 20 });
+      const shifts = db.createObjectStore('shifts', { keyPath: 'id' });
+      shifts.createIndex('user_id', 'user_id');
+      shifts.createIndex('user_id_work_date', ['user_id', 'work_date']);
+      shifts.createIndex('employment_id', 'employment_id');
+      db.createObjectStore('applications', { keyPath: 'id' });
+      db.createObjectStore('applicationEvents', { keyPath: 'id' });
+      db.createObjectStore('meta', { keyPath: 'key' });
+    };
+    request.onsuccess = () => {
+      request.result.close();
+      resolve();
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
 function openDatabase(databaseName) {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(databaseName);

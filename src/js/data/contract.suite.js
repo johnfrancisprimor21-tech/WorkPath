@@ -168,6 +168,86 @@ export function runContractTests(makeRepo) {
     assert.equal((await repo.applicationEvents.listForApplication(application.id)).some((row) => row.id === later.id), false);
   });
 
+  test('payroll entries create, order, filter inclusively, update, remove, and set-null jobs', async () => {
+    const repo = await makeRepo();
+    const job = await repo.employments.create({ employer_name: 'Pay Co' });
+    const older = await repo.payrollEntries.create({
+      employment_id: job.id,
+      pay_date: '2025-03-31',
+      period_start: '2025-03-16',
+      period_end: '2025-03-31',
+      gross: 100.005,
+      net: 90.001,
+      notes: 'Month end'
+    });
+    const sameDayA = await repo.payrollEntries.create({ pay_date: '2025-04-01', net: 100 });
+    const sameDayB = await repo.payrollEntries.create({ pay_date: '2025-04-01', gross: 110, deductions: 10, net: 100 });
+    const newest = await repo.payrollEntries.create({ pay_date: '2025-04-02', net: 75 });
+
+    assert.equal(older.gross, 100.01);
+    assert.equal(older.net, 90);
+    assert.equal(typeof older.deductions, 'number');
+    assert.equal(older.deductions, 0);
+    assert.equal(older.user_id, USER_A);
+    assert.equal(sameDayA.employment_id, null);
+    assert.equal(sameDayA.period_start, null);
+    assert.equal(sameDayA.period_end, null);
+    assert.equal(sameDayA.gross, null);
+    assert.equal(sameDayA.deductions, 0);
+    assert.equal(sameDayA.notes, null);
+    assert.deepEqual((await repo.payrollEntries.list()).map((entry) => entry.id), [
+      newest.id,
+      ...[sameDayA.id, sameDayB.id].sort(),
+      older.id
+    ]);
+    assert.deepEqual((await repo.payrollEntries.list({ limit: 2 })).map((entry) => entry.id), [
+      newest.id,
+      ...[sameDayA.id, sameDayB.id].sort()
+    ].slice(0, 2));
+    assert.deepEqual((await repo.payrollEntries.listBetween('2025-04-01', '2025-04-01')).map((entry) => entry.id),
+      [sameDayA.id, sameDayB.id].sort());
+    const updated = await repo.payrollEntries.update(older.id, { net: 88.888, notes: 'Adjusted' });
+    assert.equal(updated.net, 88.89);
+    assert.equal(updated.notes, 'Adjusted');
+
+    const linked = await repo.payrollEntries.create({ employment_id: job.id, pay_date: '2025-04-03', net: 50 });
+    assert.equal(await repo.employments.remove(job.id), undefined);
+    assert.equal((await repo.payrollEntries.list()).find((entry) => entry.id === linked.id).employment_id, null);
+    assert.equal(await repo.payrollEntries.remove(older.id), undefined);
+    assert.equal((await repo.payrollEntries.list()).some((entry) => entry.id === older.id), false);
+    await assert.rejects(repo.payrollEntries.listBetween('2025-04-02', '2025-04-01'),
+      (error) => error instanceof DataError && error.code === 'validation');
+    await assert.rejects(repo.payrollEntries.list({ limit: -1 }),
+      (error) => error instanceof DataError && error.code === 'validation');
+  });
+
+  test('payroll amount and date validation uses validation DataErrors', async () => {
+    const repo = await makeRepo();
+    const invalidEntries = [
+      { net: 10 },
+      { pay_date: '2025-02-30', net: 10 },
+      { pay_date: '2025-04-01', period_start: '2025-02-30', period_end: '2025-04-02', net: 10 },
+      { pay_date: '2025-04-01', period_start: '2025-04-02', period_end: '2025-04-01', net: 10 },
+      { pay_date: '2025-04-01', net: null },
+      { pay_date: '2025-04-01', net: -0.01 },
+      { pay_date: '2025-04-01', gross: -1, net: 1 },
+      { pay_date: '2025-04-01', deductions: -1, net: 1 },
+      { pay_date: '2025-04-01', net: 10_000_000_000 },
+      { pay_date: '2025-04-01', gross: 10_000_000_000, net: 1 },
+      { pay_date: '2025-04-01', deductions: 10_000_000_000, net: 1 }
+    ];
+    for (const input of invalidEntries) {
+      await assert.rejects(repo.payrollEntries.create(input),
+        (error) => error instanceof DataError && error.code === 'validation');
+    }
+    const job = await repo.employments.create({ employer_name: 'Own job' });
+    await assert.rejects(repo.payrollEntries.create({ pay_date: '2025-04-01', employment_id: 'not-a-job', net: 1 }),
+      (error) => error instanceof DataError && error.code === 'permission');
+    const entry = await repo.payrollEntries.create({ pay_date: '2025-04-01', employment_id: job.id, net: 1 });
+    await assert.rejects(repo.payrollEntries.update(entry.id, { net: -1 }),
+      (error) => error instanceof DataError && error.code === 'validation');
+  });
+
   test('invalid entity values reject with validation errors', async () => {
     const repo = await makeRepo();
     await repo.profile.get();
@@ -263,6 +343,7 @@ export function runContractTests(makeRepo) {
       const eventB = await userB.applicationEvents.create({
         application_id: applicationB.id, event_type: 'note', event_date: '2025-01-01T12:00:00.000Z'
       });
+      const payrollB = await userB.payrollEntries.create({ pay_date: '2025-01-01', net: 250 });
 
       assert.equal((await userA.profile.get()).id, USER_A);
       await userA.profile.update({ display_name: 'A only' });
@@ -271,24 +352,30 @@ export function runContractTests(makeRepo) {
       assert.deepEqual(await userA.shifts.listBetween('2025-01-01', '2025-01-01'), []);
       assert.deepEqual(await userA.applications.list(), []);
       assert.deepEqual(await userA.applicationEvents.listForApplication(applicationB.id), []);
+      assert.deepEqual(await userA.payrollEntries.list(), []);
 
       await assert.rejects(userA.employments.update(employmentB.id, { employer_name: 'Changed' }), (error) => error instanceof DataError && error.code === 'not_found');
       await assert.rejects(userA.shifts.update(shiftB.id, { notes: 'Changed' }), (error) => error instanceof DataError && error.code === 'not_found');
       await assert.rejects(userA.applications.update(applicationB.id, { company: 'Changed' }), (error) => error instanceof DataError && error.code === 'not_found');
       await assert.rejects(userA.applicationEvents.update(eventB.id, { notes: 'Changed' }), (error) => error instanceof DataError && error.code === 'not_found');
+      await assert.rejects(userA.payrollEntries.update(payrollB.id, { net: 1 }), (error) => error instanceof DataError && error.code === 'not_found');
       await assert.rejects(userA.shifts.create({ work_date: '2025-01-02', employment_id: employmentB.id }), (error) => error instanceof DataError && error.code === 'permission');
       await assert.rejects(userA.applicationEvents.create({
         application_id: applicationB.id, event_type: 'note', event_date: '2025-01-02T12:00:00.000Z'
       }), (error) => error instanceof DataError && error.code === 'permission');
+      await assert.rejects(userA.payrollEntries.create({ pay_date: '2025-01-02', employment_id: employmentB.id, net: 1 }),
+        (error) => error instanceof DataError && error.code === 'permission');
 
       await userA.employments.remove(employmentB.id);
       await userA.shifts.remove(shiftB.id);
       await userA.applications.remove(applicationB.id);
       await userA.applicationEvents.remove(eventB.id);
+      await userA.payrollEntries.remove(payrollB.id);
       assert.equal((await userB.employments.list()).length, 1);
       assert.equal((await userB.shifts.listBetween('2025-01-01', '2025-01-01')).length, 1);
       assert.equal((await userB.applications.list()).length, 1);
       assert.equal((await userB.applicationEvents.listForApplication(applicationB.id)).length, 1);
+      assert.equal((await userB.payrollEntries.list()).length, 1);
     });
   } else {
     test('repository scopes reads and writes to the current user', { skip: 'This repository factory does not model multiple users.' }, () => {});

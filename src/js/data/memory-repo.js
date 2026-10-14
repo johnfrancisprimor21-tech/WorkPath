@@ -2,6 +2,7 @@ import {
   compareApplicationEvents,
   compareApplications,
   compareEmployments,
+  comparePayrollEntries,
   compareShifts
 } from './contract.js';
 import { DataError } from './errors.js';
@@ -11,13 +12,16 @@ import {
   APPLICATION_DEFAULTS,
   EMPLOYMENT_DEFAULTS,
   PROFILE_DEFAULTS,
+  PAYROLL_ENTRY_DEFAULTS,
   SHIFT_DEFAULTS,
   normalizeHourlyRate,
+  normalizePayrollAmount,
   validateApplication,
   validateApplicationEvent,
   validateDateRange,
   validateEmployment,
   validateProfile,
+  validatePayrollEntry,
   validateShift
 } from './validation.js';
 
@@ -27,7 +31,8 @@ export function createMemoryStore() {
     employments: [],
     shifts: [],
     applications: [],
-    applicationEvents: []
+    applicationEvents: [],
+    payrollEntries: []
   };
 }
 
@@ -140,6 +145,9 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         store.employments.splice(index, 1);
         for (const shift of store.shifts) {
           if (shift.user_id === owner && shift.employment_id === id) shift.employment_id = null;
+        }
+        for (const entry of store.payrollEntries) {
+          if (entry.user_id === owner && entry.employment_id === id) entry.employment_id = null;
         }
       }
     },
@@ -260,6 +268,44 @@ export function createMemoryRepo({ getUserId, store = createMemoryStore() } = {}
         const index = store.applicationEvents.findIndex((item) => item.id === id && item.user_id === owner);
         if (index >= 0) store.applicationEvents.splice(index, 1);
       }
+    },
+    payrollEntries: {
+      async list({ limit } = {}) {
+        const owner = userId();
+        validatePayrollLimit(limit);
+        let rows = store.payrollEntries.filter((item) => item.user_id === owner).slice().sort(comparePayrollEntries);
+        if (limit !== undefined) rows = rows.slice(0, limit);
+        return rows.map(normalizePayrollEntry);
+      },
+      async listBetween(fromDate, toDate) {
+        validateDateRange(fromDate, toDate);
+        const owner = userId();
+        return store.payrollEntries.filter((item) => item.user_id === owner && item.pay_date >= fromDate && item.pay_date <= toDate)
+          .slice().sort(comparePayrollEntries).map(normalizePayrollEntry);
+      },
+      async create(input) {
+        const owner = userId();
+        const candidate = { ...PAYROLL_ENTRY_DEFAULTS, ...withoutIdentity(input) };
+        validatePayrollEntry(candidate);
+        checkEmploymentReference(candidate.employment_id);
+        const row = { ...normalizePayrollEntryValues(candidate), id: newId(), user_id: owner };
+        store.payrollEntries.push(row);
+        return normalizePayrollEntry(row);
+      },
+      async update(id, input) {
+        const row = ownRecord(store.payrollEntries, id, 'payroll_entry');
+        const updates = withoutIdentity(input);
+        const candidate = { ...row, ...updates };
+        validatePayrollEntry(candidate);
+        checkEmploymentReference(candidate.employment_id);
+        Object.assign(row, normalizePayrollEntryValues(updates));
+        return normalizePayrollEntry(row);
+      },
+      async remove(id) {
+        const owner = userId();
+        const index = store.payrollEntries.findIndex((item) => item.id === id && item.user_id === owner);
+        if (index >= 0) store.payrollEntries.splice(index, 1);
+      }
     }
   };
 }
@@ -270,6 +316,24 @@ function copy(value) {
 
 function normalizeEmployment(row) {
   return { ...copy(row), hourly_rate: row.hourly_rate === null ? null : Number(row.hourly_rate) };
+}
+
+function normalizePayrollEntry(row) {
+  return { ...copy(row), gross: row.gross == null ? null : Number(row.gross), deductions: Number(row.deductions), net: Number(row.net) };
+}
+
+function normalizePayrollEntryValues(values) {
+  const normalized = { ...values };
+  for (const key of ['gross', 'deductions', 'net']) {
+    if (key in normalized) normalized[key] = normalizePayrollAmount(normalized[key]);
+  }
+  return normalized;
+}
+
+function validatePayrollLimit(limit) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+    throw new DataError('validation', 'Payroll entry limit must be a whole number of zero or more.');
+  }
 }
 
 function normalizeShift(row) {
@@ -304,6 +368,7 @@ function missingMessage(kind) {
   if (kind === 'employment') return 'We could not update this job. Refresh the page and try again.';
   if (kind === 'shift') return 'We could not find this shift to update. Refresh the page and try again.';
   if (kind === 'application') return 'We could not find this application to update. Refresh the page and try again.';
+  if (kind === 'payroll_entry') return 'We could not find this payday to update. Refresh the page and try again.';
   return 'We could not find this timeline event to update. Refresh the page and try again.';
 }
 

@@ -8,10 +8,9 @@
  * Repositories return plain data objects and reject with DataError for failed
  * reads or writes. Every create returns the complete created row including id;
  * every update returns the complete updated row; remove resolves to undefined.
- * The current surface covers profiles, employments, shifts, applications, and
- * application events. Payroll entries will be added as a separate entity in
- * the later payroll task; future import/export work should enumerate all
- * entity collections through this same repository boundary.
+ * The current surface covers profiles, employments, shifts, applications,
+ * application events, and payroll entries; future import/export work should
+ * enumerate all entity collections through this same repository boundary.
  *
  * Ordering is part of the contract:
  * - employments: is_current descending, start_date descending (null last), id
@@ -22,6 +21,7 @@
  *   created_at column, so events with the same event_date timestamp have no
  *   creation order and are only tie-broken by id. The timeline may reverse this
  *   order for presentation.
+ * - payroll entries: pay_date descending, id ascending.
  *
  * Date range filters for shifts include both endpoints. Application list
  * limits are applied after the fixed ordering; an omitted limit means all rows.
@@ -45,12 +45,20 @@
  * - applicationEvents.listForApplication returns events for one of the current
  *   user's applications. create and update return full rows; remove resolves
  *   with undefined when the row is absent or not visible.
+ * - payrollEntries.list and listBetween return the current user's entries in
+ *   fixed order; listBetween filters pay_date inclusively. create and update
+ *   return full entries; remove resolves with undefined when not visible.
+ *   Invalid pay dates, reversed periods, invalid amounts, or another user's
+ *   employment reference reject with DataError codes validation or permission.
  * - Failed operations reject with DataError: validation for bad values,
  *   permission for disallowed access, not_found for missing reads or updates,
  *   network for connectivity errors, and unknown for other failures.
  *
- * Task 8 can extend this module with payroll entity typedefs and methods without
- * changing the ownership, error, or serialization conventions above.
+ * Payroll date range filters include both endpoints and list limits are applied
+ * after ordering. Payroll amounts are finite JavaScript numbers rounded to two
+ * decimal places. Employment links are nullable and must belong to the current
+ * user. Invalid dates, periods, or amounts reject with DataError code
+ * validation.
  */
 
 /** @typedef {'employed'|'job_seeker'} UserMode */
@@ -130,6 +138,31 @@
  */
 /** @typedef {Omit<ApplicationEvent, 'id'|'user_id'>} ApplicationEventInput */
 
+/**
+ * @typedef {Object} PayrollEntry
+ * @property {string} id UUID
+ * @property {string} user_id UUID of the current repository user
+ * @property {string|null} employment_id UUID
+ * @property {string} pay_date YYYY-MM-DD
+ * @property {string|null} period_start YYYY-MM-DD
+ * @property {string|null} period_end YYYY-MM-DD
+ * @property {number|null} gross Money in currency units, rounded to cents
+ * @property {number} deductions Money in currency units, rounded to cents
+ * @property {number} net Money in currency units, rounded to cents
+ * @property {string|null} notes
+ */
+/**
+ * @typedef {Object} PayrollEntryInput
+ * @property {string} pay_date Required YYYY-MM-DD pay date
+ * @property {string|null=} employment_id Optional current user's job UUID
+ * @property {string|null=} period_start Optional YYYY-MM-DD
+ * @property {string|null=} period_end Optional YYYY-MM-DD
+ * @property {number|null=} gross Optional money amount in currency units
+ * @property {number=} deductions Optional money amount; defaults to zero
+ * @property {number} net Required money amount in currency units
+ * @property {string|null=} notes
+ */
+
 /** @typedef {Object} StatusChangeResult @property {Application} application @property {boolean} warning */
 
 /**
@@ -139,6 +172,7 @@
  * @property {{listBetween(fromDate: string, toDate: string): Promise<Shift[]>, create(input: ShiftInput): Promise<Shift>, update(id: string, input: Partial<ShiftInput>): Promise<Shift>, remove(id: string): Promise<void>}} shifts
  * @property {{list(options?: {limit?: number}): Promise<Application[]>, create(input: ApplicationInput): Promise<Application>, update(id: string, input: Partial<ApplicationInput>): Promise<Application>, remove(id: string): Promise<void>, changeStatus(id: string, newStatus: ApplicationStatus): Promise<StatusChangeResult>}} applications
  * @property {{listForApplication(applicationId: string): Promise<ApplicationEvent[]>, create(input: ApplicationEventInput): Promise<ApplicationEvent>, update(id: string, input: Partial<ApplicationEventInput>): Promise<ApplicationEvent>, remove(id: string): Promise<void>}} applicationEvents
+ * @property {{list(options?: {limit?: number}): Promise<PayrollEntry[]>, listBetween(fromDate: string, toDate: string): Promise<PayrollEntry[]>, create(input: PayrollEntryInput): Promise<PayrollEntry>, update(id: string, input: Partial<PayrollEntryInput>): Promise<PayrollEntry>, remove(id: string): Promise<void>}} payrollEntries
  */
 
 export function compareEmployments(a, b) {
@@ -160,6 +194,11 @@ export function compareApplications(a, b) {
 
 export function compareApplicationEvents(a, b) {
   return compareTimestamp(a.event_date, b.event_date)
+    || compareText(a.id, b.id);
+}
+
+export function comparePayrollEntries(a, b) {
+  return compareText(b.pay_date, a.pay_date)
     || compareText(a.id, b.id);
 }
 

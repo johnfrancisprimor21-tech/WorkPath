@@ -187,7 +187,7 @@ export function renderJobsPage({ repo, profile }) {
   function showDeleteConfirmation(job, actions) {
     actions.replaceChildren(el('p', {
       className: 'inline-confirmation-copy',
-      text: 'Delete this job? Existing shifts will stay but lose their employer link.'
+      text: 'Delete this job? Existing shifts and paydays will stay but lose their employer link.'
     }));
     const confirm = makeButton('Delete job', { className: 'button button-danger' });
     const cancel = makeButton('Keep job', { className: 'button button-secondary' });

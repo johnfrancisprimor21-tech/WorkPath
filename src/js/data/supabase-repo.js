@@ -1,12 +1,27 @@
 import { getSupabaseClient } from '../supabase.js';
-import { compareApplicationEvents } from './contract.js';
+import { compareApplicationEvents, comparePayrollEntries } from './contract.js';
 import { DataError } from './errors.js';
 import { normalizeTimestamp } from './normalize-timestamp.js';
 import { computeWorkedMinutes } from '../shared/hours.js';
+import {
+  APPLICATION_DEFAULTS,
+  EMPLOYMENT_DEFAULTS,
+  PAYROLL_ENTRY_DEFAULTS,
+  SHIFT_DEFAULTS,
+  normalizeHourlyRate,
+  normalizePayrollAmount,
+  validateApplication,
+  validateApplicationEvent,
+  validateDateRange,
+  validateEmployment,
+  validateProfile,
+  validateShift,
+  validatePayrollEntry
+} from './validation.js';
 
 /** Create the Supabase-backed implementation of the Workpath repository. */
-export function createSupabaseRepo({ getUserId }) {
-  const supabase = getSupabaseClient();
+export function createSupabaseRepo({ getUserId, client = getSupabaseClient() }) {
+  const supabase = client;
 
   function userId() {
     const id = getUserId?.();
@@ -49,30 +64,102 @@ export function createSupabaseRepo({ getUserId }) {
     );
   }
 
+  async function getProfile(owner) {
+    return one(
+      supabase.from('profiles').select('*').eq('id', owner).maybeSingle(),
+      'profile', 'read', 'We could not find your profile. Sign out and sign in again, or contact support.'
+    );
+  }
+
+  async function getEmployment(id, owner) {
+    return one(
+      supabase.from('employments').select('*').eq('id', id).eq('user_id', owner).maybeSingle(),
+      'employment', 'read', 'We could not find this job. Refresh the page and try again.'
+    );
+  }
+
+  async function getShift(id, owner) {
+    return one(
+      supabase.from('shifts').select('*').eq('id', id).eq('user_id', owner).maybeSingle(),
+      'shift', 'read', 'We could not find this shift. Refresh the page and try again.'
+    );
+  }
+
+  async function getApplicationEvent(id, owner) {
+    return one(
+      supabase.from('application_events').select('*').eq('id', id).eq('user_id', owner).maybeSingle(),
+      'application_event', 'read', 'We could not find this timeline event. Refresh the page and try again.'
+    );
+  }
+
   async function updateApplication(id, values) {
     const owner = userId();
+    const current = await getApplication(id);
+    const updates = withoutIdentity(values);
+    validateApplication({ ...current, ...updates });
     const row = await one(
-      supabase.from('applications').update(withoutIdentity(values)).eq('id', id).eq('user_id', owner)
+      supabase.from('applications').update(updates).eq('id', id).eq('user_id', owner)
         .select('*').maybeSingle(),
       'application', 'update', 'We could not find this application to update. Refresh the page and try again.'
     );
     return normalizeApplication(row);
   }
 
+  async function getPayrollEntry(id, owner) {
+    return one(
+      supabase.from('payroll_entries').select('*').eq('id', id).eq('user_id', owner).maybeSingle(),
+      'payroll_entry', 'read', 'We could not find this payday. Refresh the page and try again.'
+    );
+  }
+
+  async function listPayrollEntries(query, limit) {
+    if (limit !== undefined) {
+      let result;
+      try { result = await query.limit(limit); } catch (error) {
+        throw queryError(error, 'payroll_entry', 'read');
+      }
+      if (result.error) throw queryError(result.error, 'payroll_entry', 'read');
+      return (result.data || []).map(normalizePayrollEntry).sort(comparePayrollEntries);
+    }
+    const rows = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      let result;
+      try { result = await query.range(offset, offset + pageSize - 1); } catch (error) {
+        throw queryError(error, 'payroll_entry', 'read');
+      }
+      if (result.error) throw queryError(result.error, 'payroll_entry', 'read');
+      rows.push(...(result.data || []));
+      if (!result.data || result.data.length < pageSize) break;
+    }
+    return rows.map(normalizePayrollEntry).sort(comparePayrollEntries);
+  }
+
+  async function checkEmploymentReference(employmentId, owner, entity) {
+    if (!employmentId) return;
+    let result;
+    try {
+      result = await supabase.from('employments').select('id').eq('id', employmentId).eq('user_id', owner).maybeSingle();
+    } catch (error) {
+      throw queryError(error, entity, 'read');
+    }
+    if (result.error) throw queryError(result.error, entity, 'read');
+    if (!result.data) throw new DataError('permission', 'Choose one of your jobs or select no employer.');
+  }
+
   return {
     profile: {
       async get() {
         const owner = userId();
-        const row = await one(
-          supabase.from('profiles').select('*').eq('id', owner).maybeSingle(),
-          'profile', 'read', 'We could not find your profile. Sign out and sign in again, or contact support.'
-        );
+        const row = await getProfile(owner);
         return normalizeProfile(row);
       },
       async update(values) {
         const owner = userId();
+        const updates = withoutIdentity(values);
+        validateProfile({ ...await getProfile(owner), ...updates });
         const row = await one(
-          supabase.from('profiles').update(withoutIdentity(values)).eq('id', owner).select('*').maybeSingle(),
+          supabase.from('profiles').update(updates).eq('id', owner).select('*').maybeSingle(),
           'profile', 'update', 'We could not find your profile to update. Please sign out and sign in again.'
         );
         return normalizeProfile(row);
@@ -95,16 +182,24 @@ export function createSupabaseRepo({ getUserId }) {
       },
       async create(input) {
         const owner = userId();
+        const candidate = { ...EMPLOYMENT_DEFAULTS, ...withoutIdentity(input) };
+        validateEmployment(candidate);
+        candidate.hourly_rate = normalizeHourlyRate(candidate.hourly_rate);
         const row = await one(
-          supabase.from('employments').insert({ ...withoutIdentity(input), user_id: owner }).select('*').single(),
+          supabase.from('employments').insert({ ...candidate, user_id: owner }).select('*').single(),
           'employment', 'create', 'We could not create this job. Check the details and try again.'
         );
         return normalizeEmployment(row);
       },
       async update(id, input) {
         const owner = userId();
+        const current = await getEmployment(id, owner);
+        const updates = withoutIdentity(input);
+        const candidate = { ...current, ...updates };
+        validateEmployment(candidate);
+        if (updates.hourly_rate !== undefined) updates.hourly_rate = normalizeHourlyRate(updates.hourly_rate);
         const row = await one(
-          supabase.from('employments').update(withoutIdentity(input)).eq('id', id).eq('user_id', owner)
+          supabase.from('employments').update(updates).eq('id', id).eq('user_id', owner)
             .select('*').maybeSingle(),
           'employment', 'update', 'We could not update this job. Refresh the page and try again.'
         );
@@ -134,16 +229,24 @@ export function createSupabaseRepo({ getUserId }) {
       },
       async create(input) {
         const owner = userId();
+        const values = { ...SHIFT_DEFAULTS, ...withoutDerived(input) };
+        validateShift(values);
+        await checkEmploymentReference(values.employment_id, owner, 'shift');
         const row = await one(
-          supabase.from('shifts').insert({ ...withoutDerived(input), user_id: owner }).select('*').single(),
+          supabase.from('shifts').insert({ ...values, user_id: owner }).select('*').single(),
           'shift', 'create', 'We could not create this shift. Check the details and try again.'
         );
         return normalizeShift(row);
       },
       async update(id, input) {
         const owner = userId();
+        const current = await getShift(id, owner);
+        const updates = withoutDerived(input);
+        const candidate = { ...current, ...updates };
+        validateShift(candidate);
+        await checkEmploymentReference(candidate.employment_id, owner, 'shift');
         const row = await one(
-          supabase.from('shifts').update(withoutDerived(input)).eq('id', id).eq('user_id', owner)
+          supabase.from('shifts').update(updates).eq('id', id).eq('user_id', owner)
             .select('*').maybeSingle(),
           'shift', 'update', 'We could not find this shift to update. Refresh the page and try again.'
         );
@@ -188,8 +291,10 @@ export function createSupabaseRepo({ getUserId }) {
       },
       async create(input) {
         const owner = userId();
+        const candidate = { ...APPLICATION_DEFAULTS, ...withoutIdentity(input) };
+        validateApplication(candidate);
         const row = await one(
-          supabase.from('applications').insert({ ...withoutIdentity(input), user_id: owner }).select('*').single(),
+          supabase.from('applications').insert({ ...candidate, user_id: owner }).select('*').single(),
           'application', 'create', 'We could not create this application. Check the details and try again.'
         );
         return normalizeApplication(row);
@@ -236,8 +341,13 @@ export function createSupabaseRepo({ getUserId }) {
       },
       async update(id, input) {
         const owner = userId();
+        const current = await getApplicationEvent(id, owner);
+        const updates = withoutIdentity(input);
+        const candidate = { ...current, ...updates };
+        validateApplicationEvent(candidate);
+        await checkApplicationReference(candidate.application_id, owner);
         const row = await one(
-          supabase.from('application_events').update(withoutIdentity(input)).eq('id', id).eq('user_id', owner)
+          supabase.from('application_events').update(updates).eq('id', id).eq('user_id', owner)
             .select('*').maybeSingle(),
           'application_event', 'update', 'We could not find this timeline event to update. Refresh the page and try again.'
         );
@@ -247,21 +357,85 @@ export function createSupabaseRepo({ getUserId }) {
         const owner = userId();
         await none(supabase.from('application_events').delete().eq('id', id).eq('user_id', owner), 'application_event', 'delete');
       }
+    },
+    payrollEntries: {
+      async list({ limit } = {}) {
+        const owner = userId();
+        validatePayrollLimit(limit);
+        return listPayrollEntries(payrollEntryListQuery(owner), limit);
+      },
+      async listBetween(fromDate, toDate) {
+        validateDateRange(fromDate, toDate);
+        const owner = userId();
+        const query = payrollEntryListQuery(owner).gte('pay_date', fromDate).lte('pay_date', toDate);
+        return listPayrollEntries(query);
+      },
+      async create(input) {
+        const owner = userId();
+        const candidate = { ...PAYROLL_ENTRY_DEFAULTS, ...withoutIdentity(input) };
+        validatePayrollEntry(candidate);
+        const values = normalizePayrollEntryValues(candidate);
+        await checkEmploymentReference(values.employment_id, owner, 'payroll_entry');
+        const row = await one(
+          supabase.from('payroll_entries').insert({ ...values, user_id: owner }).select('*').single(),
+          'payroll_entry', 'create', 'We could not save this payday. Check the details and try again.'
+        );
+        return normalizePayrollEntry(row);
+      },
+      async update(id, input) {
+        const owner = userId();
+        const current = await getPayrollEntry(id, owner);
+        const updates = withoutIdentity(input);
+        const candidate = { ...current, ...updates };
+        validatePayrollEntry(candidate);
+        const values = normalizePayrollEntryValues(updates);
+        await checkEmploymentReference(candidate.employment_id, owner, 'payroll_entry');
+        const row = await one(
+          supabase.from('payroll_entries').update(values).eq('id', id).eq('user_id', owner)
+            .select('*').maybeSingle(),
+          'payroll_entry', 'update', 'We could not find this payday to update. Refresh the page and try again.'
+        );
+        return normalizePayrollEntry(row);
+      },
+      async remove(id) {
+        const owner = userId();
+        await none(supabase.from('payroll_entries').delete().eq('id', id).eq('user_id', owner), 'payroll_entry', 'delete');
+      }
     }
   };
 
   async function insertApplicationEvent(input) {
     const owner = userId();
+    const candidate = { notes: null, ...withoutIdentity(input) };
+    validateApplicationEvent(candidate);
+    await checkApplicationReference(candidate.application_id, owner);
     const row = await one(
-      supabase.from('application_events').insert({ ...withoutIdentity(input), user_id: owner }).select('*').single(),
+      supabase.from('application_events').insert({ ...candidate, user_id: owner }).select('*').single(),
       'application_event', 'create', 'We could not create this timeline event. Try again.'
     );
     return normalizeApplicationEvent(row);
   }
 
+  async function checkApplicationReference(applicationId, owner) {
+    let result;
+    try {
+      result = await supabase.from('applications').select('id').eq('id', applicationId).eq('user_id', owner).maybeSingle();
+    } catch (error) {
+      throw queryError(error, 'application_event', 'read');
+    }
+    if (result.error) throw queryError(result.error, 'application_event', 'read');
+    if (!result.data) throw new DataError('permission', 'This application is no longer available.');
+  }
+
   function applicationListQuery(owner) {
     return supabase.from('applications').select('*').eq('user_id', owner)
       .order('date_applied', { ascending: false })
+      .order('id', { ascending: true });
+  }
+
+  function payrollEntryListQuery(owner) {
+    return supabase.from('payroll_entries').select('*').eq('user_id', owner)
+      .order('pay_date', { ascending: false })
       .order('id', { ascending: true });
   }
 }
@@ -301,10 +475,26 @@ function normalizeApplicationEvent(row) {
   return { ...row, event_date: normalizeTimestamp(row.event_date) };
 }
 
-function validateDateRange(fromDate, toDate) {
-  const datePattern = /^\d{4}-\d{2}-\d{2}$/;
-  if (!datePattern.test(String(fromDate)) || !datePattern.test(String(toDate)) || fromDate > toDate) {
-    throw new DataError('validation', 'Choose a valid inclusive date range.');
+function normalizePayrollEntry(row) {
+  return {
+    ...row,
+    gross: row.gross == null ? null : Number(row.gross),
+    deductions: Number(row.deductions),
+    net: Number(row.net)
+  };
+}
+
+function normalizePayrollEntryValues(values) {
+  const normalized = { ...values };
+  for (const key of ['gross', 'deductions', 'net']) {
+    if (key in normalized) normalized[key] = normalizePayrollAmount(normalized[key]);
+  }
+  return normalized;
+}
+
+function validatePayrollLimit(limit) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+    throw new DataError('validation', 'Payroll entry limit must be a whole number of zero or more.');
   }
 }
 
@@ -339,6 +529,7 @@ function permissionMessage(entity, operation) {
   if (entity === 'employment') return 'You can only change your own jobs.';
   if (entity === 'shift') return 'You can only change your own shifts.';
   if (entity === 'application_event') return 'You can only change events on your own applications.';
+  if (entity === 'payroll_entry') return 'You can only change your own payroll entries.';
   return 'You can only change your own applications.';
 }
 
@@ -366,6 +557,7 @@ function foreignKeyMessage(entity) {
   if (entity === 'shift') return 'Choose one of your jobs or select no employer.';
   if (entity === 'application_event') return 'This application is no longer available.';
   if (entity === 'application') return 'This record is no longer available.';
+  if (entity === 'payroll_entry') return 'Choose one of your jobs or select no employer.';
   return unknownMessage(entity, 'write');
 }
 

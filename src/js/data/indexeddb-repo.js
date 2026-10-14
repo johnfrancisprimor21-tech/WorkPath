@@ -2,6 +2,7 @@ import {
   compareApplicationEvents,
   compareApplications,
   compareEmployments,
+  comparePayrollEntries,
   compareShifts
 } from './contract.js';
 import { DataError } from './errors.js';
@@ -10,19 +11,22 @@ import { computeWorkedMinutes } from '../shared/hours.js';
 import {
   APPLICATION_DEFAULTS,
   EMPLOYMENT_DEFAULTS,
+  PAYROLL_ENTRY_DEFAULTS,
   PROFILE_DEFAULTS,
   SHIFT_DEFAULTS,
   normalizeHourlyRate,
+  normalizePayrollAmount,
   validateApplication,
   validateApplicationEvent,
   validateDateRange,
   validateEmployment,
   validateProfile,
+  validatePayrollEntry,
   validateShift
 } from './validation.js';
 
 export const LOCAL_DATABASE_NAME = 'workpath-local';
-const DATABASE_VERSION = 1;
+const DATABASE_VERSION = 2;
 const PROFILE_ID_KEY = 'local-user-id';
 const PERSISTENCE_KEY = 'storage-persistence';
 
@@ -205,7 +209,7 @@ export function createIndexedDbRepo({ getUserId, databaseName = LOCAL_DATABASE_N
       },
       async remove(id) {
         const owner = await userId();
-        return withTransaction(['employments', 'shifts'], 'readwrite', async (tx) => {
+        return withTransaction(['employments', 'shifts', 'payroll_entries'], 'readwrite', async (tx) => {
           const employments = tx.objectStore('employments');
           const row = await requestResult(employments.get(id));
           if (!row || row.user_id !== owner) return;
@@ -215,6 +219,11 @@ export function createIndexedDbRepo({ getUserId, databaseName = LOCAL_DATABASE_N
             if (shift.user_id === owner && shift.employment_id === id) {
               await requestResult(shifts.put({ ...shift, employment_id: null }));
             }
+          }
+          const payrollEntries = tx.objectStore('payroll_entries');
+          const entries = await requestResult(payrollEntries.index('employment_id').getAll(id));
+          for (const entry of entries) {
+            if (entry.user_id === owner) await requestResult(payrollEntries.put({ ...entry, employment_id: null }));
           }
           await requestResult(employments.delete(id));
         });
@@ -349,6 +358,59 @@ export function createIndexedDbRepo({ getUserId, databaseName = LOCAL_DATABASE_N
         const owner = await userId();
         return withTransaction('applicationEvents', 'readwrite', async (tx) => {
           const store = tx.objectStore('applicationEvents');
+          const row = await requestResult(store.get(id));
+          if (row?.user_id === owner) await requestResult(store.delete(id));
+        });
+      }
+    },
+    payrollEntries: {
+      async list({ limit } = {}) {
+        const owner = await userId();
+        validatePayrollLimit(limit);
+        return withTransaction('payroll_entries', 'readonly', async (tx) => {
+          let rows = (await requestResult(tx.objectStore('payroll_entries').getAll()))
+            .filter((row) => row.user_id === owner).sort(comparePayrollEntries);
+          if (limit !== undefined) rows = rows.slice(0, limit);
+          return rows.map(normalizePayrollEntry);
+        });
+      },
+      async listBetween(fromDate, toDate) {
+        validateDateRange(fromDate, toDate);
+        const owner = await userId();
+        return withTransaction('payroll_entries', 'readonly', async (tx) => {
+          return (await requestResult(tx.objectStore('payroll_entries').getAll()))
+            .filter((row) => row.user_id === owner && row.pay_date >= fromDate && row.pay_date <= toDate)
+            .sort(comparePayrollEntries).map(normalizePayrollEntry);
+        });
+      },
+      async create(input) {
+        const owner = await userId();
+        const candidate = { ...PAYROLL_ENTRY_DEFAULTS, ...withoutIdentity(input) };
+        validatePayrollEntry(candidate);
+        const row = { ...normalizePayrollEntryValues(candidate), id: newId(), user_id: owner };
+        return withTransaction(['payroll_entries', 'employments'], 'readwrite', async (tx) => {
+          await checkEmploymentReference(tx, row.employment_id);
+          await requestResult(tx.objectStore('payroll_entries').add(row));
+          return normalizePayrollEntry(row);
+        });
+      },
+      async update(id, input) {
+        const owner = await userId();
+        const updates = withoutIdentity(input);
+        return withTransaction(['payroll_entries', 'employments'], 'readwrite', async (tx) => {
+          const row = await ownRecord(tx, 'payroll_entries', id, 'payroll_entry');
+          const candidate = { ...row, ...updates };
+          validatePayrollEntry(candidate);
+          await checkEmploymentReference(tx, candidate.employment_id);
+          const normalized = { ...row, ...normalizePayrollEntryValues(updates) };
+          await requestResult(tx.objectStore('payroll_entries').put(normalized));
+          return normalizePayrollEntry(normalized);
+        });
+      },
+      async remove(id) {
+        const owner = await userId();
+        return withTransaction('payroll_entries', 'readwrite', async (tx) => {
+          const store = tx.objectStore('payroll_entries');
           const row = await requestResult(store.get(id));
           if (row?.user_id === owner) await requestResult(store.delete(id));
         });
@@ -572,6 +634,13 @@ function upgradeDatabase(db, oldVersion) {
     ]);
     createStore(db, 'meta', 'key');
   }
+  if (oldVersion < 2) {
+    createStore(db, 'payroll_entries', 'id', [
+      ['user_id', 'user_id'],
+      ['user_id_pay_date', ['user_id', 'pay_date']],
+      ['employment_id', 'employment_id']
+    ]);
+  }
 }
 
 function createStore(db, name, keyPath, indexes = []) {
@@ -622,6 +691,29 @@ function mapStorageError(error, mode = 'readonly') {
 
 function normalizeEmployment(row) {
   return { ...copy(row), hourly_rate: row.hourly_rate == null ? null : Number(row.hourly_rate) };
+}
+
+function normalizePayrollEntry(row) {
+  return {
+    ...copy(row),
+    gross: row.gross == null ? null : Number(row.gross),
+    deductions: Number(row.deductions),
+    net: Number(row.net)
+  };
+}
+
+function normalizePayrollEntryValues(values) {
+  const normalized = { ...values };
+  for (const key of ['gross', 'deductions', 'net']) {
+    if (key in normalized) normalized[key] = normalizePayrollAmount(normalized[key]);
+  }
+  return normalized;
+}
+
+function validatePayrollLimit(limit) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) {
+    throw new DataError('validation', 'Payroll entry limit must be a whole number of zero or more.');
+  }
 }
 
 function normalizeShift(row) {
@@ -678,5 +770,6 @@ function missingMessage(kind) {
   if (kind === 'employment') return 'We could not update this job. Refresh the page and try again.';
   if (kind === 'shift') return 'We could not find this shift to update. Refresh the page and try again.';
   if (kind === 'application') return 'We could not find this application to update. Refresh the page and try again.';
+  if (kind === 'payroll_entry') return 'We could not find this payday to update. Refresh the page and try again.';
   return 'We could not find this timeline event to update. Refresh the page and try again.';
 }

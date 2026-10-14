@@ -15,6 +15,7 @@ import {
 import { hasLocalProfile } from './data/indexeddb-repo.js';
 import { renderJobsPage } from './employed/jobs.js';
 import { renderShiftsPage } from './employed/shifts.js';
+import { renderPayrollPage } from './employed/payroll.js';
 import { renderApplicationsPage } from './job-seeker/applications.js';
 import { renderSettingsPage } from './shared/settings.js';
 import { currentMonthInTimeZone } from './shared/time.js';
@@ -297,7 +298,7 @@ function renderRoute() {
     return;
   }
 
-  if (route === '/employed/jobs' || route === '/employed/shifts') {
+  if (route === '/employed/jobs' || route === '/employed/shifts' || route === '/employed/pay') {
     if (state.profile.mode !== 'employed') {
       navigate('/app', { replace: true });
       return;
@@ -307,7 +308,9 @@ function renderRoute() {
     try {
       root.replaceChildren(route === '/employed/jobs'
         ? renderJobsPage(pageOptions)
-        : renderShiftsPage(pageOptions));
+        : route === '/employed/shifts'
+          ? renderShiftsPage(pageOptions)
+          : renderPayrollPage(pageOptions));
     } catch (error) {
       renderProblem('Employed records unavailable', error.message || 'We could not open this page.', {
         label: 'Return home',
