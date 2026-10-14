@@ -38,8 +38,8 @@ export function findPeriodAnchor(entries) {
     ?.period_start ?? null;
 }
 
-/** Estimate gross pay using rated duty-shift minutes only; no overtime premium is applied. */
-export function estimatePay({ shifts, employments, fromDate, toDate }) {
+/** Estimate gross pay from rated duty shifts, optionally scoped to one employment; no overtime premium is applied. */
+export function estimatePay({ shifts, employments, fromDate, toDate, employmentId = null }) {
   const ratedMinutesByEmployment = new Map();
   const ratesInCents = new Map();
   for (const employment of employments) {
@@ -53,6 +53,7 @@ export function estimatePay({ shifts, employments, fromDate, toDate }) {
   let minutesUnrated = 0;
   let shiftsUnrated = 0;
   for (const shift of shifts) {
+    if (employmentId != null && shift.employment_id !== employmentId) continue;
     if (shift.day_type !== 'duty' || shift.work_date < fromDate || shift.work_date > toDate) continue;
     const minutes = Math.max(0, Math.floor(Number(shift.worked_minutes) || 0));
     if (shift.employment_id == null || !ratesInCents.has(shift.employment_id)) {

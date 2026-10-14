@@ -186,19 +186,34 @@ async function testUnratedShift(context) {
 
 async function testComparisonPills(context) {
   const job = await context.repo.employments.create({ employer_name: 'Verdict Co', hourly_rate: 20 });
+  const secondJob = await context.repo.employments.create({ employer_name: 'Second Verdict Co', hourly_rate: 30 });
   await context.repo.shifts.create({
     employment_id: job.id, work_date: '2026-10-09', day_type: 'duty',
     time_in: '2026-10-09T09:00:00Z', time_out: '2026-10-09T10:00:00Z'
   });
+  await context.repo.shifts.create({
+    employment_id: secondJob.id, work_date: '2026-10-09', day_type: 'duty',
+    time_in: '2026-10-09T11:00:00Z', time_out: '2026-10-09T12:00:00Z'
+  });
   const period = { period_start: '2026-10-01', period_end: '2026-10-31' };
-  await context.repo.payrollEntries.create({ ...period, pay_date: '2026-10-10', gross: 20, net: 20 });
-  await context.repo.payrollEntries.create({ ...period, pay_date: '2026-10-11', gross: 19.79, net: 19.79 });
-  await context.repo.payrollEntries.create({ ...period, pay_date: '2026-10-12', gross: 20.21, net: 20.21 });
+  await context.repo.payrollEntries.create({ ...period, employment_id: job.id, pay_date: '2026-10-10', gross: 20, net: 20 });
+  await context.repo.payrollEntries.create({ ...period, employment_id: job.id, pay_date: '2026-10-11', gross: 19.79, net: 19.79 });
+  await context.repo.payrollEntries.create({ ...period, employment_id: job.id, pay_date: '2026-10-12', gross: 20.21, net: 20.21 });
+  await context.repo.payrollEntries.create({
+    ...period, employment_id: job.id, pay_date: '2026-10-13', gross: 20, net: 20, notes: 'Linked employer estimate'
+  });
+  await context.repo.payrollEntries.create({
+    ...period, pay_date: '2026-10-14', gross: 20, net: 20, notes: 'All jobs estimate'
+  });
   const page = await mountPayroll(context);
   const cards = [...page.querySelectorAll('.payroll-entry-card')].map((card) => card.textContent);
   expect(cards.some((text) => text.includes('Matches estimate')), 'Gross within one percent should match.');
   expect(cards.some((text) => text.includes('below estimate')), 'Lower gross should show a below-estimate pill.');
   expect(cards.some((text) => text.includes('above estimate')), 'Higher gross should show an above-estimate pill.');
+  expect(cards.some((text) => text.includes('Linked employer estimate') && text.includes('Matches estimate')),
+    'A linked payday should compare against shifts for only its employer.');
+  expect(cards.some((text) => text.includes('All jobs estimate') && text.includes('Gross is $30.00 below estimate')),
+    'An unlinked payday should compare against shifts for all employers.');
 }
 
 async function testDeleteEmployment(context) {

@@ -62,9 +62,22 @@ export function renderPayrollPage({ repo, profile }) {
 
       estimatesByPeriod = new Map();
       for (const period of periods) {
-        const key = periodKey(period.start, period.end);
+        const key = estimateKey(period.start, period.end);
         if (!estimatesByPeriod.has(key)) {
           estimatesByPeriod.set(key, estimatePay({ shifts, employments, fromDate: period.start, toDate: period.end }));
+        }
+      }
+      for (const entry of entries) {
+        if (!entry.period_start || !entry.period_end) continue;
+        const key = estimateKey(entry.period_start, entry.period_end, entry.employment_id);
+        if (!estimatesByPeriod.has(key)) {
+          estimatesByPeriod.set(key, estimatePay({
+            shifts,
+            employments,
+            fromDate: entry.period_start,
+            toDate: entry.period_end,
+            employmentId: entry.employment_id
+          }));
         }
       }
       renderSummary(today);
@@ -85,7 +98,7 @@ export function renderPayrollPage({ repo, profile }) {
   function renderSummary(today) {
     summary.replaceChildren();
     const estimate = currentPeriod
-      ? estimatesByPeriod.get(periodKey(currentPeriod.start, currentPeriod.end))
+      ? estimatesByPeriod.get(estimateKey(currentPeriod.start, currentPeriod.end))
       : null;
     const currentMonth = getPayPeriod(today, 'monthly');
     const monthNetCents = entries
@@ -108,7 +121,7 @@ export function renderPayrollPage({ repo, profile }) {
 
   function renderEstimateNote() {
     const estimate = currentPeriod
-      ? estimatesByPeriod.get(periodKey(currentPeriod.start, currentPeriod.end))
+      ? estimatesByPeriod.get(estimateKey(currentPeriod.start, currentPeriod.end))
       : null;
     estimateNote.textContent = 'Estimates use hourly rate × worked hours and exclude overtime premiums and unrated shifts.'
       + (estimate?.shiftsUnrated > 0
@@ -151,7 +164,7 @@ export function renderPayrollPage({ repo, profile }) {
           + ' · Deductions ' + formatMoney(entry.deductions, profile.currency) }));
       }
       const periodEstimate = entry.period_start && entry.period_end
-        ? estimatesByPeriod.get(periodKey(entry.period_start, entry.period_end))
+        ? estimatesByPeriod.get(estimateKey(entry.period_start, entry.period_end, entry.employment_id))
         : null;
       const verdict = periodEstimate ? compareToEstimate(entry, periodEstimate.totalCents, periodEstimate.minutesRated) : null;
       if (verdict) item.append(verdictBadge(verdict));
@@ -332,6 +345,10 @@ function summarySkeleton() {
 
 function periodKey(start, end) {
   return start + '|' + end;
+}
+
+function estimateKey(start, end, employmentId = null) {
+  return periodKey(start, end) + '|' + (employmentId == null ? 'all' : employmentId);
 }
 
 function formatDate(value) {

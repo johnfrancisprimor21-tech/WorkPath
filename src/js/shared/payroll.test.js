@@ -61,6 +61,36 @@ test('estimates rated duty shifts, rounds grouped employment cents, and excludes
   }), { totalCents: 0, minutesRated: 0, minutesUnrated: 120, shiftsUnrated: 2 });
 });
 
+test('payday estimates scope rated and unrated shifts by employment', () => {
+  const employments = [
+    { id: 'job-a', hourly_rate: 20 },
+    { id: 'job-b', hourly_rate: 30 },
+    { id: 'unrated-job', hourly_rate: null }
+  ];
+  const shifts = [
+    { employment_id: 'job-a', work_date: '2025-01-10', day_type: 'duty', worked_minutes: 60 },
+    { employment_id: 'job-b', work_date: '2025-01-10', day_type: 'duty', worked_minutes: 60 },
+    { employment_id: 'unrated-job', work_date: '2025-01-10', day_type: 'duty', worked_minutes: 30 }
+  ];
+  const period = { fromDate: '2025-01-01', toDate: '2025-01-31' };
+  const linkedEstimate = estimatePay({ shifts, employments, ...period, employmentId: 'job-a' });
+  const allJobsEstimate = estimatePay({ shifts, employments, ...period });
+  const unratedJobEstimate = estimatePay({ shifts, employments, ...period, employmentId: 'unrated-job' });
+
+  assert.deepEqual(linkedEstimate, { totalCents: 2000, minutesRated: 60, minutesUnrated: 0, shiftsUnrated: 0 });
+  assert.deepEqual(allJobsEstimate, { totalCents: 5000, minutesRated: 120, minutesUnrated: 30, shiftsUnrated: 1 });
+  assert.deepEqual(unratedJobEstimate, { totalCents: 0, minutesRated: 0, minutesUnrated: 30, shiftsUnrated: 1 });
+
+  const linkedEntry = { gross: 20, period_start: period.fromDate, period_end: period.toDate, employment_id: 'job-a' };
+  const unlinkedEntry = { ...linkedEntry, employment_id: null };
+  assert.deepEqual(compareToEstimate(linkedEntry, linkedEstimate.totalCents, linkedEstimate.minutesRated), {
+    status: 'matches', differenceCents: 0
+  });
+  assert.deepEqual(compareToEstimate(unlinkedEntry, allJobsEstimate.totalCents, allJobsEstimate.minutesRated), {
+    status: 'below', differenceCents: 3000
+  });
+});
+
 test('gross comparison handles one-percent, missing-data, and zero-estimate cases', () => {
   const entry = { gross: 99, period_start: '2025-01-01', period_end: '2025-01-31' };
   assert.deepEqual(compareToEstimate(entry, 10000, 60), { status: 'matches', differenceCents: 100 });

@@ -73,6 +73,22 @@ Manual checklist (use an account set to Employed mode):
 
 Automated tests use Node's built-in test runner and fake-indexeddb to exercise the shared repository contract against memory and IndexedDB, including user isolation, timestamp normalization, storage cleanup, and the Supabase/IndexedDB access boundary. Other tests cover worked-minute calculations, HTTP(S)-only links, optional email validation, application counts, Asia/Manila, New York daylight-saving transitions, and overnight shifts.
 
+### Payroll browser checks
+
+The browser regression page is separate from `npm test`. Start Vite with `npm run dev -- --host 127.0.0.1`, then open `http://127.0.0.1:5173/tests/browser/payroll.html` in a browser. It runs each payroll check with both local IndexedDB and a network-free fake account repository.
+
+For a headless Playwright run, keep Playwright and Chromium outside the project. In a second PowerShell terminal, run:
+
+```powershell
+$playwrightDir = Join-Path $env:TEMP 'workpath-playwright'
+npm install --prefix $playwrightDir --no-save --no-package-lock playwright
+& (Join-Path $playwrightDir 'node_modules/.bin/playwright.cmd') install chromium
+$env:WORKPATH_PLAYWRIGHT_DIR = $playwrightDir
+node tests/browser/run-payroll.cjs
+```
+
+The runner uses the installed Playwright directory and exits nonzero if the page reports failed checks.
+
 Manual checklist (use an account set to Job Seeker mode):
 
 1. Add an application with company, position, date, and pending status. Add optional source, URL, location, contact, and notes. Confirm it appears newest first with a status badge and a safe external job link.
