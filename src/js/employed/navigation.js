@@ -5,7 +5,8 @@ const ITEMS = [
   ['/app', 'Home', 'home'],
   ['/employed/shifts', 'Shifts', 'calendar'],
   ['/employed/pay', 'Pay', 'pay'],
-  ['/employed/jobs', 'Jobs', 'jobs']
+  ['/employed/jobs', 'Jobs', 'jobs'],
+  ['/employed/stats', 'Stats', 'statistics']
 ];
 
 export function renderEmployedNavigation(activePath) {

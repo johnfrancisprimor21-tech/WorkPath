@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Workpath statistics browser checks</title>
+    <link rel="stylesheet" href="/src/css/styles.css" />
+    <style>
+      body { padding: 1rem; }
+      #test-results { max-width: 48rem; margin: 1rem auto; }
+      #test-results li { padding: .5rem 0; }
+      #test-results [data-result="fail"] { color: #b42318; font-weight: 700; }
+      #test-results [data-result="pass"] { color: #16794d; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Statistics browser regression checks</h1>
+      <p id="test-summary" role="status">Running local and account-mode checks…</p>
+      <ol id="test-results" aria-live="polite"></ol>
+      <div id="test-app" aria-label="Browser test app"></div>
+    </main>
+    <script type="module" src="./statistics-runner.js"></script>
+  </body>
+</html>

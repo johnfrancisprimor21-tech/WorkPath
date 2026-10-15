@@ -16,6 +16,7 @@ import { hasLocalProfile } from './data/indexeddb-repo.js';
 import { renderJobsPage } from './employed/jobs.js';
 import { renderShiftsPage } from './employed/shifts.js';
 import { renderPayrollPage } from './employed/payroll.js';
+import { renderEmployedStatisticsPage, renderJobSeekerStatisticsPage } from './shared/statistics-screen.js';
 import { renderApplicationsPage } from './job-seeker/applications.js';
 import { renderSettingsPage } from './shared/settings.js';
 import { currentMonthInTimeZone } from './shared/time.js';
@@ -43,6 +44,7 @@ let supabase;
 let authSubscription = null;
 let localRepo = null;
 let dashboardView = null;
+let employedStatsRange = 6;
 let sessionVersion = 0;
 let restoringSession = true;
 let sawAuthEventDuringRestore = false;
@@ -298,7 +300,7 @@ function renderRoute() {
     return;
   }
 
-  if (route === '/employed/jobs' || route === '/employed/shifts' || route === '/employed/pay') {
+  if (route === '/employed/jobs' || route === '/employed/shifts' || route === '/employed/pay' || route === '/employed/stats') {
     if (state.profile.mode !== 'employed') {
       navigate('/app', { replace: true });
       return;
@@ -310,7 +312,13 @@ function renderRoute() {
         ? renderJobsPage(pageOptions)
         : route === '/employed/shifts'
           ? renderShiftsPage(pageOptions)
-          : renderPayrollPage(pageOptions));
+          : route === '/employed/pay'
+            ? renderPayrollPage(pageOptions)
+            : renderEmployedStatisticsPage({
+                ...pageOptions,
+                selectedRange: employedStatsRange,
+                onRangeChange: (value) => { employedStatsRange = value; }
+              }));
     } catch (error) {
       renderProblem('Employed records unavailable', error.message || 'We could not open this page.', {
         label: 'Return home',
@@ -320,7 +328,7 @@ function renderRoute() {
     return;
   }
 
-  if (route === '/seeker/applications') {
+  if (route === '/seeker/applications' || route === '/seeker/stats') {
     if (state.profile.mode !== 'job_seeker') {
       navigate('/app', { replace: true });
       return;
@@ -328,7 +336,9 @@ function renderRoute() {
     dashboardView = null;
     const pageOptions = { repo: getRepo(), profile: state.profile };
     try {
-      root.replaceChildren(renderApplicationsPage(pageOptions));
+      root.replaceChildren(route === '/seeker/applications'
+        ? renderApplicationsPage(pageOptions)
+        : renderJobSeekerStatisticsPage(pageOptions));
     } catch (error) {
       renderProblem('Applications unavailable', error.message || 'We could not open this page.', {
         label: 'Return home',

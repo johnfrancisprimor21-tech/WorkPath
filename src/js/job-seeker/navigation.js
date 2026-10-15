@@ -3,7 +3,8 @@ import { createIcon } from '../shared/icons.js';
 
 const ITEMS = [
   ['/app', 'Home', 'home'],
-  ['/seeker/applications', 'Applications', 'applications']
+  ['/seeker/applications', 'Applications', 'applications'],
+  ['/seeker/stats', 'Stats', 'statistics']
 ];
 
 export function renderJobSeekerNavigation(activePath) {
