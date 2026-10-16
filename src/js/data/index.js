@@ -1,5 +1,5 @@
 import { createSupabaseRepo } from './supabase-repo.js';
-import { createIndexedDbRepo } from './indexeddb-repo.js';
+import { createIndexedDbRepo, deleteIndexedDbDatabase, hasLocalProfile, LOCAL_DATABASE_NAME } from './indexeddb-repo.js';
 
 export const STORAGE_MODE_KEY = 'workpath.storageMode';
 let activeRepo = null;
@@ -13,6 +13,39 @@ export function configureSupabaseRepo(options) {
 export function configureIndexedDbRepo(options) {
   activeRepo = createIndexedDbRepo(options);
   return activeRepo;
+}
+
+/** Return only read methods for an existing on-device profile, without creating local data. */
+export async function getReadOnlyLocalRepo() {
+  if (!await hasLocalProfile({ databaseName: LOCAL_DATABASE_NAME })) return null;
+  const identityRepo = createIndexedDbRepo({ getUserId: () => null });
+  let localUserId;
+  try {
+    localUserId = await identityRepo.getOrCreateLocalUserId();
+  } finally {
+    identityRepo.close();
+  }
+  const repo = createIndexedDbRepo({
+    getUserId: () => localUserId,
+    databaseName: LOCAL_DATABASE_NAME
+  });
+  return {
+    profile: { get: () => repo.profile.get() },
+    employments: { list: () => repo.employments.list() },
+    shifts: { listBetween: (fromDate, toDate) => repo.shifts.listBetween(fromDate, toDate) },
+    payrollEntries: {
+      list: (options) => repo.payrollEntries.list(options),
+      listBetween: (fromDate, toDate) => repo.payrollEntries.listBetween(fromDate, toDate)
+    },
+    applications: { list: (options) => repo.applications.list(options) },
+    applicationEvents: { listForApplication: (applicationId) => repo.applicationEvents.listForApplication(applicationId) },
+    close: () => repo.close()
+  };
+}
+
+/** Delete the default local database after the UI has requested typed confirmation. */
+export function deleteLocalDatabase() {
+  return deleteIndexedDbDatabase(LOCAL_DATABASE_NAME);
 }
 
 export function getStorageMode() {

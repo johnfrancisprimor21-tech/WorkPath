@@ -3,6 +3,7 @@ import { createPreferenceFields } from './profile-fields.js';
 import { createIcon } from './icons.js';
 import { renderEmployedNavigation } from '../employed/navigation.js';
 import { renderJobSeekerNavigation } from '../job-seeker/navigation.js';
+import { renderTransferSection } from '../transfer/settings-transfer.js';
 
 export function renderSettingsPage(profile, options) {
   const page = el('div', { className: 'page-wrap authenticated-page settings-page' });
@@ -60,7 +61,16 @@ export function renderSettingsPage(profile, options) {
   }
 
   const storage = createStorageSection(options);
-  card.append(form, storage.section);
+  const transfer = renderTransferSection({
+    repo: options.repo,
+    profile,
+    storageMode: options.storageMode,
+    fileApi: options.fileApi,
+    getReadOnlyLocalRepo: options.getReadOnlyLocalRepo,
+    onLocalCopyDeleted: options.onLocalCopyDeleted,
+    fileApi: options.fileApi
+  });
+  card.append(form, storage.section, transfer);
   if (options.storageMode === 'local') {
     card.append(storage.localActions);
   } else {

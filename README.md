@@ -8,6 +8,8 @@ Screens use the repository returned by `getRepo()` in `src/js/data/index.js`. Wo
 
 Account-mode Stats do not cache repository reads, so loading records requires a network connection. Local mode can load its IndexedDB data offline. If an account-mode read fails, the Stats page shows the repository's friendly network error and a “Try again” action without presenting empty charts or zero-valued summaries as loaded data.
 
+JSON backup format version 1 includes user-entered records but omits account identity, database-managed fields, and derived values. Import only adds records; natural-key duplicates are skipped by default, and amounts are never converted when currencies differ. The Settings transfer UI uses `src/js/shared/files.js` for all file picking and saving, keeping browser file access behind one replaceable boundary. Account users can move data from an existing local database through the same preview and importer; the local copy remains unless the user explicitly deletes it. Transfer browser checks are separate from `npm test`: start Vite, set `WORKPATH_BROWSER_TEST_URL` to `/tests/browser/transfer.html`, and run `node tests/browser/run-payroll.cjs` with the external Playwright installation documented below.
+
 ## Run the app
 
 1. Install dependencies:
@@ -102,6 +104,16 @@ The runner uses the installed Playwright directory and exits nonzero if the page
 
 For the Statistics browser regression page, keep the same dev server and Playwright installation, set `$env:WORKPATH_BROWSER_TEST_URL = 'http://127.0.0.1:5173/tests/browser/statistics.html'`, then run `node tests/browser/run-payroll.cjs`.
 
+### Backup and transfer browser checks
+
+Start Vite with `npm run dev -- --host 127.0.0.1`. In another PowerShell terminal, use the same external Playwright installation documented above:
+
+```powershell
+$env:WORKPATH_PLAYWRIGHT_DIR = Join-Path $env:TEMP 'workpath-playwright'
+$env:WORKPATH_BROWSER_TEST_URL = 'http://127.0.0.1:5173/tests/browser/transfer.html'
+node tests/browser/run-payroll.cjs
+```
+
 Manual checklist (use an account set to Job Seeker mode):
 
 1. Add an application with company, position, date, and pending status. Add optional source, URL, location, contact, and notes. Confirm it appears newest first with a status badge and a safe external job link.
@@ -112,6 +124,14 @@ Manual checklist (use an account set to Job Seeker mode):
 6. Switch to Employed mode and back. Confirm applications remain. While Employed mode is selected, open `#/seeker/applications` directly and confirm it redirects to `#/app`.
 
 Automated helper tests cover HTTP(S)-only URL validation, optional email validation, and per-status counts.
+
+## End-to-end browser suite
+
+The Playwright suite drives the actual Vite app in Chromium. Install the browser once with `npx playwright install chromium`, then run `npm run e2e`. `npm run e2e:local` runs only local-mode cases and requires no test-user credentials. `npm run e2e:headed` opens Chromium while running the full suite. The suite starts Vite on `127.0.0.1:5173` and reuses an existing server.
+
+Account scenarios use a dedicated Supabase test account and are opt-in: set `E2E_ACCOUNT=1` and put `E2E_EMAIL` and `E2E_PASSWORD` in the ignored `.env.e2e.local` file. Otherwise account-mode tests skip and local-mode tests still run. Global setup signs in once and stores the session under ignored `playwright/.auth/`. Failure artifacts go under ignored `test-results/` and `playwright-report/`. Account traces are disabled so authorization headers cannot enter trace files.
+
+Account-mode E2E is currently unreliable: a failed test restarts the worker and can lose the shared saved session, while injected-failure tests can trip the console-error guard. The planned redesign is for each account test to sign in through the real login form, with tests that inject failures explicitly allowing only their own expected console errors.
 
 ## Apply the database migration
 

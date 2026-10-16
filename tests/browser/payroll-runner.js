@@ -239,6 +239,7 @@ async function testPayFrequencyChange(context) {
   const settings = renderSettingsPage(context.profile, {
     storageMode: context.mode,
     storageProtected: true,
+    repo: context.repo,
     onSaveSettings: async (values) => { context.profile = await context.repo.profile.update(values); },
     onLogout: async () => {},
     onSwitchToAccount: () => {},

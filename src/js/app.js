@@ -8,6 +8,8 @@ import {
   clearRepo,
   configureIndexedDbRepo,
   configureSupabaseRepo,
+  deleteLocalDatabase,
+  getReadOnlyLocalRepo,
   getRepo,
   getStorageMode,
   setStorageMode
@@ -354,6 +356,9 @@ function renderRoute() {
       root.replaceChildren(renderSettingsPage(state.profile, {
         storageMode: state.storageMode,
         storageProtected: state.storageProtected,
+        repo: getRepo(),
+        getReadOnlyLocalRepo,
+        onLocalCopyDeleted: deleteLocalCopyFromAccount,
         onSaveSettings: saveSettings,
         onLogout: logout,
         onSwitchToAccount: switchToAccountAuth,
@@ -512,6 +517,11 @@ async function deleteAllLocalData() {
   state.notice = null;
   navigate('/login', { replace: true });
   renderRoute();
+}
+
+async function deleteLocalCopyFromAccount() {
+  await deleteLocalDatabase();
+  state.localProfileExists = false;
 }
 
 async function logout() {
