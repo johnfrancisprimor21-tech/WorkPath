@@ -8,7 +8,23 @@ Screens use the repository returned by `getRepo()` in `src/js/data/index.js`. Wo
 
 Account-mode Stats do not cache repository reads, so loading records requires a network connection. Local mode can load its IndexedDB data offline. If an account-mode read fails, the Stats page shows the repository's friendly network error and a “Try again” action without presenting empty charts or zero-valued summaries as loaded data.
 
-JSON backup format version 1 includes user-entered records but omits account identity, database-managed fields, and derived values. Import only adds records; natural-key duplicates are skipped by default, and amounts are never converted when currencies differ. The Settings transfer UI uses `src/js/shared/files.js` for all file picking and saving, keeping browser file access behind one replaceable boundary. Account users can move data from an existing local database through the same preview and importer; the local copy remains unless the user explicitly deletes it. Transfer browser checks are separate from `npm test`: start Vite, set `WORKPATH_BROWSER_TEST_URL` to `/tests/browser/transfer.html`, and run `node tests/browser/run-payroll.cjs` with the external Playwright installation documented below.
+JSON backup format version 1 includes user-entered records but omits account identity, database-managed fields, and derived values. JSON and CSV imports share the additive planner and writer: imports never update or delete existing records, and duplicates are skipped by default. The Settings transfer UI uses `src/js/shared/files.js` for all file picking and saving, keeping browser file access behind one replaceable boundary. Account users can move data from an existing local database through the same preview and importer; the local copy remains unless the user explicitly deletes it. Transfer browser checks are separate from `npm test`: start Vite, set `WORKPATH_BROWSER_TEST_URL` to `/tests/browser/transfer.html`, and run `node tests/browser/run-payroll.cjs` with the external Playwright installation documented below.
+
+## CSV export and import
+
+CSV files use UTF-8 with a BOM, commas, and standard double-quote escaping. Headers are lower-case with underscores; imports match header names without regard to case or column order and warn about ignored extra columns. Export covers all records in each selected list. Timeline events are export-only. Imports add records only; existing rows are not updated or deleted. Job references on shifts and paydays match an existing job by employer and title (or by employer alone when exactly one job has that name). Amounts are read in the profile currency and are never converted.
+
+| CSV list | Columns (in order) | Import |
+| --- | --- | --- |
+| Jobs | `employer_name` (required), `job_title`, `hourly_rate`, `start_date`, `end_date`, `is_current` | Yes |
+| Shifts | `work_date` (required), `employer_name`, `job_title`, `day_type` (required), `time_in`, `time_out`, `break_minutes`, `is_overtime`, `notes`, `timezone`, `worked_hours` (export only; ignored on import) | Yes |
+| Paydays | `pay_date` (required), `employer_name`, `job_title`, `period_start`, `period_end`, `gross`, `deductions`, `net` (required), `notes` | Yes |
+| Applications | `company` (required), `position` (required), `source`, `job_url`, `location`, `date_applied` (required), `status` (required), `contact_name`, `contact_email`, `notes` | Yes |
+| Timeline events | `company`, `position`, `date_applied`, `event_type`, `event_date`, `event_time`, `notes` | No; export only |
+
+Dates must be `YYYY-MM-DD`; times must be 24-hour `HH:MM`. Money must be a plain non-negative number with an optional decimal point and up to two decimals, without grouping commas or currency symbols. Booleans accept `yes`/`no`, `true`/`false`, or `1`/`0`. Shift day types are `duty`, `off`, `leave`, `sick`, and `holiday`; application statuses are `pending`, `interview`, `offer`, `rejected`, and `no_response`. Imports reject Excel-style dates and 12-hour time values rather than guessing. A shift time in a timezone column is converted from that zone to UTC; when a fall-back time occurs twice, the first occurrence is used, while a skipped spring-forward time is rejected. A blank timezone uses the profile timezone. Formula-like text is guarded on export and restored on import.
+
+To prepare a spreadsheet, choose **Save As → CSV UTF-8 (Comma delimited)**. Format date cells as `YYYY-MM-DD`, time cells as `HH:MM`, and money cells as plain numbers before saving. Files are limited to 10 MB and 20,000 data rows. Downloaded templates contain only a header row; each importable list has an on-screen example and format notes. The CSV browser scenario is part of the local Playwright suite (`npm run e2e:local`); account-mode E2E is not required for this check.
 
 ## Run the app
 

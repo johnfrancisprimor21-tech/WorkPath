@@ -3,6 +3,8 @@ import { todayInTimeZone } from '../shared/time.js';
 import { MAX_TEXT_FILE_BYTES, pickTextFile, saveTextFile } from '../shared/files.js';
 import { buildBackup, parseBackup, BACKUP_LISTS } from './backup-format.js';
 import { planImport, runImport } from './importer.js';
+import { parseCsv, serializeCsv } from './csv.js';
+import { CSV_FORMATS, detectCsvList, exportCsv, mapCsvImport } from './csv-mappers.js';
 
 const ALL_DATES = ['0001-01-01', '9999-12-31'];
 const FILE_API = { pickTextFile, saveTextFile };
@@ -13,6 +15,9 @@ const LIST_LABELS = {
   applications: 'Applications',
   applicationEvents: 'Application timeline events'
 };
+const CSV_IMPORT_LISTS = ['employments', 'shifts', 'payrollEntries', 'applications'];
+const CSV_EXPORT_LISTS = ['employments', 'shifts', 'payrollEntries', 'applications', 'applicationEvents'];
+const CSV_LIST_LABELS = Object.fromEntries(CSV_EXPORT_LISTS.map((list) => [list, CSV_FORMATS[list].label]));
 
 export function renderTransferSection({
   repo,
@@ -38,12 +43,40 @@ export function renderTransferSection({
   const importButton = makeButton('Import backup (JSON)', { className: 'button button-primary' });
   actions.append(exportButton, importButton);
   const preview = el('div', { className: 'transfer-preview' });
+  const csvSection = el('section', { className: 'csv-transfer-section' });
+  const csvExports = el('div', { className: 'csv-export-actions' });
+  const csvTemplates = el('div', { className: 'csv-template-list' });
+  const importCsvButton = makeButton('Import CSV', { className: 'button button-primary' });
+  csvSection.append(
+    el('h3', { text: 'Export CSV' }),
+    el('p', { className: 'muted-copy', text: 'Export a spreadsheet file for any list. CSV files contain plain text.' }),
+    csvExports,
+    el('h3', { text: 'Import CSV' }),
+    el('p', { className: 'muted-copy', text: 'Import adds records only. Amounts are read in your profile currency and are not converted.' }),
+    importCsvButton,
+    el('h4', { text: 'CSV templates and format help' }),
+    csvTemplates
+  );
+  for (const list of CSV_EXPORT_LISTS) {
+    const button = makeButton('Export ' + CSV_LIST_LABELS[list] + ' CSV', { className: 'button button-secondary' });
+    button.addEventListener('click', () => { void exportCsvList(list, button); });
+    csvExports.append(button);
+  }
+  for (const list of CSV_IMPORT_LISTS) {
+    const format = CSV_FORMATS[list];
+    const details = el('details', { className: 'csv-template-help' });
+    const templateButton = makeButton('Download ' + format.label + ' template', { className: 'button button-secondary' });
+    details.append(el('summary', { text: format.label }), el('p', { className: 'muted-copy', text: format.help }), templateButton);
+    templateButton.addEventListener('click', () => { void downloadTemplate(list, templateButton); });
+    csvTemplates.append(details);
+  }
   const localCopy = el('section', { className: 'local-copy-status' });
   localCopy.hidden = true;
-  section.append(status, actions, preview, localCopy);
+  section.append(status, actions, csvSection, preview, localCopy);
 
   exportButton.addEventListener('click', () => { void exportBackup(); });
   importButton.addEventListener('click', () => { void chooseBackup(); });
+  importCsvButton.addEventListener('click', () => { void chooseCsv(); });
   if (storageMode === 'account') void checkLocalCopy();
 
   return section;
@@ -84,6 +117,103 @@ export function renderTransferSection({
     } finally {
       importButton.disabled = false;
     }
+  }
+
+  async function exportCsvList(list, button) {
+    button.disabled = true;
+    setStatus(status, 'Preparing ' + CSV_LIST_LABELS[list] + ' CSV…', 'status');
+    try {
+      const data = await readAllData(repo);
+      const text = exportCsv(list, data, profile);
+      const date = todayInTimeZone(profile.timezone || 'UTC');
+      await fileApi.saveTextFile(
+        `workpath-${CSV_FORMATS[list].slug}-${date}.csv`,
+        text,
+        'text/csv;charset=utf-8'
+      );
+      setStatus(status, CSV_LIST_LABELS[list] + ' CSV saved.', 'success');
+    } catch (error) {
+      setStatus(status, error.message || 'We could not create this CSV. Try again.', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function downloadTemplate(list, button) {
+    button.disabled = true;
+    try {
+      const format = CSV_FORMATS[list];
+      const text = serializeCsv(format.headers, [], { textColumns: format.textColumns });
+      await fileApi.saveTextFile(`workpath-${format.slug}-template.csv`, text, 'text/csv;charset=utf-8');
+      setStatus(status, format.label + ' template saved.', 'success');
+    } catch (error) {
+      setStatus(status, error.message || 'We could not create this template. Try again.', 'error');
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function chooseCsv() {
+    importCsvButton.disabled = true;
+    clearPreview();
+    try {
+      const picked = await fileApi.pickTextFile({ accept: 'text/csv,.csv,text/plain', maxBytes: MAX_TEXT_FILE_BYTES });
+      if (!picked) return;
+      const parsedCsv = parseCsv(picked.text);
+      if (parsedCsv.fatal) {
+        renderRefusalPreview('CSV could not be read.', parsedCsv.errors);
+        return;
+      }
+      const detected = detectCsvList(parsedCsv.headers);
+      if (detected) {
+        await prepareCsvPreview(parsedCsv, detected, picked.name);
+      } else {
+        renderCsvListChooser(parsedCsv, picked.name);
+      }
+    } catch (error) {
+      renderPreviewFailure('CSV could not be read.', error.message || 'We could not read this file. Choose it again and try once more.');
+    } finally {
+      importCsvButton.disabled = false;
+    }
+  }
+
+  function renderCsvListChooser(parsedCsv, fileName) {
+    currentPlan = null;
+    preview.replaceChildren();
+    const panel = el('section', { className: 'import-preview-panel', attrs: { 'aria-label': 'Choose CSV list' } });
+    panel.append(
+      el('h3', { text: 'Choose the CSV list' }),
+      el('p', { className: 'muted-copy', text: 'We could not identify exactly one list from the header. Choose what this file contains.' })
+    );
+    const choices = el('div', { className: 'csv-list-choices' });
+    for (const list of CSV_IMPORT_LISTS) {
+      const button = makeButton('Import as ' + CSV_LIST_LABELS[list], { className: 'button button-secondary' });
+      button.addEventListener('click', () => { void prepareCsvPreview(parsedCsv, list, 'File: ' + fileName); });
+      choices.append(button);
+    }
+    const cancel = makeButton('Cancel', { className: 'button button-secondary' });
+    cancel.addEventListener('click', clearPreview);
+    panel.append(choices, cancel);
+    preview.append(panel);
+  }
+
+  async function prepareCsvPreview(parsedCsv, list, title) {
+    let existingData;
+    try {
+      existingData = await readAllData(repo);
+    } catch (error) {
+      renderPreviewFailure('Import preview unavailable.', error.message || 'We could not load your existing data. Try again.');
+      return;
+    }
+    const mapped = mapCsvImport(parsedCsv, list, {
+      profile: existingData.profile || profile,
+      employments: existingData.employments || []
+    });
+    await openPreview(mapped.parsed, title, false, {
+      csv: true,
+      existingData,
+      employmentIdAliases: mapped.employmentIdAliases
+    });
   }
 
   async function checkLocalCopy() {
@@ -141,7 +271,7 @@ export function renderTransferSection({
     }
   }
 
-  async function openPreview(parsed, title, isMove) {
+  async function openPreview(parsed, title, isMove, options = {}) {
     currentPlan = null;
     preview.replaceChildren();
     setStatus(status, '', 'status');
@@ -152,18 +282,22 @@ export function renderTransferSection({
       return;
     }
 
-    let existingData;
-    try {
-      existingData = await readAllData(repo);
-    } catch (error) {
-      renderPreviewFailure(
-        'Import preview unavailable.',
-        error.message || 'We could not load your existing data. Try again.'
-      );
-      return;
+    let existingData = options.existingData;
+    if (!existingData) {
+      try {
+        existingData = await readAllData(repo);
+      } catch (error) {
+        renderPreviewFailure(
+          'Import preview unavailable.',
+          error.message || 'We could not load your existing data. Try again.'
+        );
+        return;
+      }
     }
     const panel = el('section', { className: 'import-preview-panel', attrs: { 'aria-label': 'Import preview' } });
-    const heading = el('h3', { text: isMove ? 'Preview move to your account' : 'Preview backup import' });
+    const heading = el('h3', {
+      text: options.csv ? 'Preview CSV import' : isMove ? 'Preview move to your account' : 'Preview backup import'
+    });
     const sourceLabel = el('p', { className: 'muted-copy', text: title });
     const summary = el('ul', { className: 'transfer-counts' });
     const examples = el('div', { className: 'transfer-examples' });
@@ -179,6 +313,7 @@ export function renderTransferSection({
       className: 'field transfer-choice-field',
       hint: 'This never changes your work mode or display name.'
     });
+    settingsField.hidden = Boolean(options.csv);
     const skipControl = el('input', { attrs: { type: 'checkbox', name: 'skip_duplicates' } });
     skipControl.checked = true;
     const skipField = field('Skip duplicate records', skipControl, { className: 'field transfer-choice-field' });
@@ -196,7 +331,8 @@ export function renderTransferSection({
       try {
         currentPlan = planImport(parsed, existingData, {
           skipDuplicates: skipControl.checked,
-          applyProfileSettings: settingsControl.checked
+          applyProfileSettings: options.csv ? false : settingsControl.checked,
+          employmentIdAliases: options.employmentIdAliases
         });
         summary.replaceChildren(...BACKUP_LISTS.map((list) => el('li', {
           text: LIST_LABELS[list] + ': add ' + currentPlan.lists[list].toCreate.length
@@ -210,7 +346,8 @@ export function renderTransferSection({
           errorsArea.append(el('h4', { text: 'Rows or settings with errors: ' + currentPlan.errors.length }));
           const list = el('ol');
           currentPlan.errors.slice(0, 10).forEach((entry) => list.append(el('li', {
-            text: entry.list + ' · row ' + entry.row + ': ' + entry.message
+            text: entry.list + ' · row ' + entry.row
+              + (entry.column ? ' · column ' + entry.column : '') + ': ' + entry.message
           })));
           errorsArea.append(list);
           if (currentPlan.errors.length > 10) {
@@ -224,7 +361,7 @@ export function renderTransferSection({
           warningsArea.append(el('h4', { text: 'Warnings' }), warningList);
         }
         const createCount = BACKUP_LISTS.reduce((sum, list) => sum + currentPlan.lists[list].toCreate.length, 0);
-        emptyReason.textContent = importBlockReason(currentPlan, parsed.data);
+        emptyReason.textContent = importBlockReason(currentPlan, parsed.data, { csv: options.csv });
         emptyReason.hidden = currentPlan.canRun && createCount > 0;
         confirm.disabled = !currentPlan.canRun || createCount === 0;
       } catch (error) {
@@ -295,22 +432,23 @@ export function renderTransferSection({
   }
 }
 
-function importBlockReason(plan, data) {
+function importBlockReason(plan, data, { csv = false } = {}) {
+  const fileLabel = csv ? 'CSV' : 'backup';
   if (!plan.canRun) {
     if (plan.errors.some((entry) => entry.row === 0 && entry.list !== 'profile')) {
-      return 'This backup has a format or list error and cannot be imported.';
+      return `This ${fileLabel} has a format or list error and cannot be imported.`;
     }
     if (plan.errors.some((entry) => entry.list === 'profile' && entry.row === 0)) {
       return 'Profile settings cannot be applied. Turn off that option to import records without changing settings.';
     }
-    return 'This backup cannot be imported. Choose another file and try again.';
+    return `This ${fileLabel} cannot be imported. Choose another file and try again.`;
   }
   const recordCount = BACKUP_LISTS.reduce((sum, list) => sum + data[list].length, 0);
   const duplicateCount = BACKUP_LISTS.reduce((sum, list) => sum + plan.lists[list].duplicates, 0);
   if (recordCount === 0 && plan.errors.length > 0) {
-    return 'There are no valid records to add. Fix the listed errors and choose the file again.';
+    return 'There are no valid rows to add. Fix the listed errors and choose the file again.';
   }
-  if (recordCount === 0) return 'This backup has no records to add.';
+  if (recordCount === 0) return `This ${fileLabel} has no records to add.`;
   if (duplicateCount > 0 && plan.errors.length > 0) {
     return 'Nothing to add: all valid records are duplicates, and the other rows have errors.';
   }

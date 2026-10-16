@@ -11,7 +11,8 @@ import {
   saveSettings,
   simpleBackup,
   startLocal,
-  uploadBackup
+  uploadBackup,
+  uploadCsv
 } from './app-helpers.js';
 import { hasE2ECredentials } from './environment.js';
 
@@ -463,6 +464,76 @@ test.describe('Local mode through the real Vite app @local', () => {
     } finally {
       await targetContext.close();
     }
+    expect(externalRequests).toEqual([]);
+  });
+
+  test('CSV export, header-only template, row error preview, retry and cancel work through Settings', async ({ page }) => {
+    const externalRequests = await startLocal(page, { displayName: 'CSV Local E2E' });
+    await page.goto('/#/settings');
+
+    const emptyDownloadPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export Jobs CSV' }).click();
+    const emptyDownload = await emptyDownloadPromise;
+    const fs = await import('node:fs/promises');
+    const emptyCsv = await fs.readFile(await emptyDownload.path(), 'utf8');
+    expect(emptyCsv.startsWith('\uFEFF')).toBe(true);
+    expect(emptyCsv.replace(/^\uFEFF/, '').trim().split(/\r?\n/)).toHaveLength(1);
+    expect(emptyCsv).toContain('employer_name,job_title,hourly_rate,start_date,end_date,is_current');
+
+    await page.locator('.csv-template-help summary').filter({ hasText: 'Jobs' }).click();
+    const templatePromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Download Jobs template' }).click();
+    const template = await templatePromise;
+    const templateText = await fs.readFile(await template.path(), 'utf8');
+    expect(templateText.replace(/^\uFEFF/, '').trim().split(/\r?\n/)).toHaveLength(1);
+
+    const htmlName = 'E2E-CSV <b>safe</b><script>alert(1)</script>';
+    const csvText = [
+      'employer_name,job_title,hourly_rate,start_date,end_date,is_current,extra_column',
+      `"${htmlName}",Analyst,31.25,2026-01-01,,yes,ignored`,
+      'E2E-CSV bad row,Analyst,not-money,2026-01-01,,yes,ignored'
+    ].join('\r\n');
+
+    await uploadCsv(page, 'jobs.csv', csvText);
+    await expect(page.getByRole('heading', { name: 'Preview CSV import' })).toBeVisible();
+    await expect(page.locator('.transfer-errors-area')).toContainText('employments · row 3 · column hourly_rate');
+    await expect(page.locator('.transfer-warnings')).toContainText('Ignored columns: extra_column');
+    const htmlPreview = page.locator('.transfer-examples');
+    await expect(htmlPreview).toContainText(htmlName);
+    await expect(htmlPreview.locator('b, script')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Confirm import' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Preview CSV import' })).toHaveCount(0);
+    await page.goto('/#/employed/jobs');
+    await expect(page.getByRole('heading', { name: htmlName, exact: true })).toHaveCount(0);
+
+    await page.goto('/#/settings');
+    await uploadCsv(page, 'jobs.csv', csvText);
+    await expect(page.getByRole('button', { name: 'Confirm import' })).toBeEnabled();
+    await page.getByRole('button', { name: 'Confirm import' }).click();
+    await expect(page.getByRole('heading', { name: 'Import complete' })).toBeVisible();
+    await expect(page.locator('.transfer-run-summary')).toContainText('Jobs: added 1');
+
+    await page.getByRole('button', { name: 'Import CSV' }).click();
+    await uploadCsv(page, 'jobs-again.csv', csvText);
+    await expect(page.locator('.transfer-counts')).toContainText('Jobs: add 0, skip 1, errors 1');
+    await expect(page.getByRole('button', { name: 'Confirm import' })).toBeDisabled();
+    await expect(page.locator('.import-preview-panel')).toContainText('Nothing to add');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+
+    const exportedPromise = page.waitForEvent('download');
+    await page.getByRole('button', { name: 'Export Jobs CSV' }).click();
+    const exported = await exportedPromise;
+    const exportedText = await fs.readFile(await exported.path(), 'utf8');
+    expect(exportedText).toContain(htmlName);
+
+    await page.evaluate(() => {
+      HTMLInputElement.prototype.click = function click() {
+        this.dispatchEvent(new Event('cancel'));
+      };
+    });
+    await page.getByRole('button', { name: 'Import CSV' }).click();
+    await expect(page.getByRole('heading', { name: 'Preview CSV import' })).toHaveCount(0);
     expect(externalRequests).toEqual([]);
   });
 

@@ -60,6 +60,11 @@ export function planImport(parsed, existingData = {}, options = {}) {
     employmentKeyByExistingId.set(record.id, key);
     if (!existingEmploymentByKey.has(key)) existingEmploymentByKey.set(key, record);
   }
+  for (const [sourceId, existingId] of options.employmentIdAliases || []) {
+    if (!employmentKeyByExistingId.has(existingId)) continue;
+    employmentKeyBySourceId.set(sourceId, employmentKeyByExistingId.get(existingId));
+    aliases.employments.set(sourceId, { existingId });
+  }
   const seenEmploymentKeys = new Map();
   for (const [index, record] of (data.employments || []).entries()) {
     const key = employmentKey(record);
@@ -72,7 +77,7 @@ export function planImport(parsed, existingData = {}, options = {}) {
       aliases.employments.set(record.id, { existingId: existingEmploymentByKey.get(key).id });
     } else {
       seenEmploymentKeys.set(key, record.id);
-      lists.employments.toCreate.push({ sourceId: record.id, sourceRow: index + 1, row: record });
+      lists.employments.toCreate.push({ sourceId: record.id, sourceRow: sourceRow(parsed, 'employments', index), row: record });
     }
   }
 
@@ -94,7 +99,7 @@ export function planImport(parsed, existingData = {}, options = {}) {
       aliases.applications.set(record.id, { existingId: existingApplicationByKey.get(key).id });
     } else {
       seenApplicationKeys.set(key, record.id);
-      lists.applications.toCreate.push({ sourceId: record.id, sourceRow: index + 1, row: record });
+      lists.applications.toCreate.push({ sourceId: record.id, sourceRow: sourceRow(parsed, 'applications', index), row: record });
     }
   }
 
@@ -111,7 +116,7 @@ export function planImport(parsed, existingData = {}, options = {}) {
       continue;
     }
     seenEventKeys.add(key);
-    lists.applicationEvents.toCreate.push({ sourceId: row.id, sourceRow: index + 1, row });
+    lists.applicationEvents.toCreate.push({ sourceId: row.id, sourceRow: sourceRow(parsed, 'applicationEvents', index), row });
   }
 
   return finish();
@@ -128,7 +133,7 @@ export function planImport(parsed, existingData = {}, options = {}) {
         continue;
       }
       seen.add(key);
-      lists[list].toCreate.push({ sourceId: row.id, sourceRow: index + 1, row });
+      lists[list].toCreate.push({ sourceId: row.id, sourceRow: sourceRow(parsed, list, index), row });
     }
   }
 
@@ -309,4 +314,9 @@ function textKey(value) {
 
 function stableKey(parts) {
   return JSON.stringify(parts);
+}
+
+function sourceRow(parsed, list, index) {
+  const row = parsed?.sourceRows?.[list]?.[index];
+  return Number.isInteger(row) && row > 0 ? row : index + 1;
 }

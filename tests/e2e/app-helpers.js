@@ -146,6 +146,18 @@ export async function uploadBackup(page, name, text) {
   });
 }
 
+export async function uploadCsv(page, name, text) {
+  const choose = page.getByRole('button', { name: 'Import CSV' });
+  const fileChooserPromise = page.waitForEvent('filechooser');
+  await choose.click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({
+    name,
+    mimeType: 'text/csv',
+    buffer: Buffer.from(text, 'utf8')
+  });
+}
+
 export function simpleBackup(overrides = {}) {
   return JSON.stringify({
     app: 'workpath',

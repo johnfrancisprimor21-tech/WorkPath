@@ -1348,6 +1348,43 @@ summary {
   gap: var(--space-2);
 }
 
+.csv-transfer-section {
+  display: grid;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.csv-transfer-section h3,
+.csv-transfer-section h4,
+.csv-transfer-section p {
+  margin: 0;
+}
+
+.csv-export-actions,
+.csv-template-list,
+.csv-list-choices {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.csv-template-help {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+}
+
+.csv-template-help summary {
+  min-height: 2.75rem;
+  align-content: center;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .transfer-preview-panel,
 .import-preview-panel,
 .local-copy-status,
