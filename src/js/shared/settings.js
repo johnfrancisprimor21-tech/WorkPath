@@ -4,6 +4,7 @@ import { createIcon } from './icons.js';
 import { renderEmployedNavigation } from '../employed/navigation.js';
 import { renderJobSeekerNavigation } from '../job-seeker/navigation.js';
 import { renderTransferSection } from '../transfer/settings-transfer.js';
+import { createInstallSection } from '../pwa/install.js';
 
 export function renderSettingsPage(profile, options) {
   const page = el('div', { className: 'page-wrap authenticated-page settings-page' });
@@ -70,7 +71,8 @@ export function renderSettingsPage(profile, options) {
     onLocalCopyDeleted: options.onLocalCopyDeleted,
     fileApi: options.fileApi
   });
-  card.append(form, storage.section, transfer);
+  const install = createInstallSection();
+  card.append(form, storage.section, transfer, install);
   if (options.storageMode === 'local') {
     card.append(storage.localActions);
   } else {

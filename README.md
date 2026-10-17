@@ -153,6 +153,20 @@ Account scenarios use a dedicated Supabase test account and are opt-in: set `E2E
 
 Account-mode E2E is currently unreliable: a failed test restarts the worker and can lose the shared saved session, while injected-failure tests can trip the console-error guard. The planned redesign is for each account test to sign in through the real login form, with tests that inject failures explicitly allowing only their own expected console errors.
 
+## Install Workpath and use it offline
+
+Workpath is an installable web app. On Android, open it in Chrome, use the browser menu, and choose **Install app** (or **Add to Home screen**). On iPhone, open Workpath in Safari, tap **Share**, then **Add to Home Screen**. The Settings page shows the install action when the browser supports it, and iOS Safari shows its install instructions. Chrome requires HTTPS for installation; `localhost` is treated as secure for development.
+
+After one online visit, the app shell and static assets are available offline. Local-mode records stay in IndexedDB and continue to work offline. Account-mode data still needs a network connection; screens show their normal network error and retry action when a read cannot reach Supabase. A session that cannot be restored offline returns to the sign-in screen with a connection message.
+
+When a new version is ready, Workpath shows a small **A new version is ready** banner. It waits for you to press **Reload**; forms and other in-progress state are left alone until you choose to reload.
+
+To test the production offline shell locally, run `npm run build`, then `npm run preview`. Open the preview once while online, then use the browser's network panel to go offline and reload. `npm run e2e:pwa` builds the app and runs the automated service-worker checks in Chromium. During development, clear the site's data in DevTools (**Application > Storage > Clear site data**) and unregister Workpath under **Application > Service Workers** before retesting first-install behavior.
+
+Task 12 hosting must serve `sw.js` and `index.html` with `Cache-Control: no-cache`, so the browser can discover updates. Hashed assets can remain cached by their content hash.
+
+The Android wrapper in Task 13 bundles the app directly and does not register this service worker.
+
 ## Apply the database migration
 
 In the Supabase SQL Editor, run the complete contents of `supabase/migrations/0001_init.sql`.

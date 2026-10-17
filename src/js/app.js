@@ -24,8 +24,10 @@ import { renderSettingsPage } from './shared/settings.js';
 import { currentMonthInTimeZone } from './shared/time.js';
 import { countApplicationStatuses, summarizeShifts } from './shared/aggregations.js';
 import { monthDateRange } from './shared/shift-summary.js';
+import { registerPwaUpdates } from './pwa/register.js';
 
 const root = document.getElementById('app');
+registerPwaUpdates();
 
 const state = {
   storageMode: getStorageMode(),
@@ -37,6 +39,7 @@ const state = {
   profile: null,
   profileLoading: false,
   profileError: null,
+  restoreOfflineMessage: null,
   pendingEmail: null,
   notice: null,
   noticeKind: 'success'
@@ -191,7 +194,9 @@ async function restoreSession() {
   } catch {
     restoringSession = false;
     state.authReady = true;
-    state.authError = 'We could not restore your session. Check your connection and refresh the page.';
+    state.session = null;
+    state.profile = null;
+    state.restoreOfflineMessage = 'We could not restore your account session. You may be offline. Connect to the internet and sign in again.';
     renderRoute();
   }
 }
@@ -246,6 +251,28 @@ function renderRoute() {
         action: () => window.location.reload()
       });
     }
+    return;
+  }
+
+  if (state.restoreOfflineMessage) {
+    if (routeFromHash() !== '/login') {
+      navigate('/login', { replace: true });
+      return;
+    }
+    const initialMessage = state.restoreOfflineMessage;
+    state.restoreOfflineMessage = null;
+    root.replaceChildren(renderAuthScreen({
+      mode: 'login',
+      initialMessage,
+      localProfileExists: state.localProfileExists,
+      onSubmit: submitAuthForm,
+      onUseLocal: switchToLocalMode,
+      onConfirmation: (email) => {
+        state.pendingEmail = email;
+        renderRoute();
+      },
+      onNavigate: (path) => navigate(path)
+    }));
     return;
   }
 

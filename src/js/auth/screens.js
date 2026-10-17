@@ -29,6 +29,7 @@ export function renderAuthScreen(options) {
     className: 'status-message status-error',
     attrs: { role: 'alert' }
   });
+  if (options.initialMessage) feedback.textContent = options.initialMessage;
   const submit = makeButton(isSignup ? 'Create account' : 'Sign in', { type: 'submit', className: 'button button-primary button-wide' });
   form.append(feedback, submit);
 

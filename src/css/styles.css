@@ -1332,6 +1332,31 @@ summary {
   margin: 0;
 }
 
+.pwa-update-banner {
+  position: fixed;
+  z-index: 1000;
+  top: max(env(safe-area-inset-top), var(--space-2));
+  left: 50%;
+  display: flex;
+  width: min(30rem, calc(100% - 2 * var(--space-3)));
+  min-height: 3.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  transform: translateX(-50%);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card);
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: 0 0.5rem 1.5rem rgb(0 0 0 / 25%);
+}
+
+.pwa-reload-button {
+  min-height: 2.75rem;
+  flex: 0 0 auto;
+}
+
 .storage-mode-label {
   margin: 0;
   font-weight: 720;
