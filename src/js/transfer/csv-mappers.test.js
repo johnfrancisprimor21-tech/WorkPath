@@ -14,10 +14,12 @@ function errorFor(result, row, column) {
   return result.parsed.errors.find((error) => error.row === row && error.column === column);
 }
 
-test('CSV detection uses required headers, ignores case and order, and reports ambiguous headers', () => {
+test('CSV detection scores recognized headers, ignores case and order, and reports ties', () => {
   assert.equal(detectCsvList(['NET', 'Pay_Date']), 'payrollEntries');
   assert.equal(detectCsvList(['company', 'position', 'status', 'date_applied']), 'applications');
-  assert.equal(detectCsvList(['work_date', 'day_type', 'employer_name', 'net', 'pay_date']), null);
+  assert.equal(detectCsvList(CSV_FORMATS.shifts.headers), 'shifts');
+  assert.equal(detectCsvList(CSV_FORMATS.payrollEntries.headers), 'payrollEntries');
+  assert.equal(detectCsvList(['employer_name']), null);
   assert.equal(detectCsvList(['unknown', 'columns']), null);
 });
 

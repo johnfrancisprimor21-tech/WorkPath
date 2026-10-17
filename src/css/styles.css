@@ -1531,3 +1531,283 @@ summary {
     transition-duration: 0.01ms !important;
   }
 }
+
+.stats-page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+
+.stats-page .stats-range-field {
+  flex: 1 1 12rem;
+  margin: 0;
+}
+
+.stats-page-toolbar > .button {
+  flex: 0 0 auto;
+}
+
+.workpath-report {
+  display: grid;
+  gap: 1rem;
+  color: #17211d;
+  font: 10pt/1.4 ui-sans-serif, system-ui, "Segoe UI", Roboto, sans-serif;
+}
+
+.report-header {
+  padding-bottom: 0.7rem;
+  border-bottom: 2px solid #24332d;
+}
+
+.report-header p,
+.report-section p {
+  margin: 0.2rem 0;
+}
+
+.report-brand {
+  margin: 0;
+  color: #31584a;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.report-header h1 {
+  margin: 0.15rem 0 0.6rem;
+  font-size: 1.55rem;
+  line-height: 1.15;
+}
+
+.report-tiles {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.report-tile,
+.report-section {
+  min-width: 0;
+  padding: 0.65rem;
+  border: 1px solid #bcc9c2;
+  border-radius: 0.5rem;
+  background: #fff;
+}
+
+.report-tile {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.report-tile span {
+  color: #46574f;
+  font-size: 0.8rem;
+}
+
+.report-tile strong {
+  font-size: 1.1rem;
+}
+
+.report-sections {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.report-section h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1rem;
+}
+
+.report-chart-section .stats-chart svg {
+  max-width: 100%;
+}
+
+.report-chart-section .stats-chart-data-table {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+}
+
+.report-note,
+.report-limit-note {
+  margin: 0.4rem 0 0;
+  color: #46574f;
+  font-size: 0.85rem;
+}
+
+.report-status-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.4rem;
+}
+
+.report-response {
+  font-size: 1.25rem;
+  font-weight: 700;
+}
+
+.report-response span {
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.workpath-report table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.78rem;
+}
+
+.workpath-report th,
+.workpath-report td {
+  padding: 0.35rem;
+  border: 1px solid #c5cec9;
+  overflow-wrap: anywhere;
+  text-align: left;
+  vertical-align: top;
+}
+
+.workpath-report thead th {
+  background: #edf1ef;
+}
+
+.report-total-row {
+  font-weight: 700;
+}
+
+.report-empty {
+  margin: 1rem 0;
+  font-size: 1rem;
+}
+
+#print-root {
+  display: none;
+}
+
+@media print {
+  @page {
+    margin: 15mm;
+  }
+
+  html,
+  body {
+    width: auto !important;
+    min-width: 0 !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  body > :not(#print-root) {
+    display: none !important;
+  }
+
+  #print-root {
+    --color-page: #fff;
+    --color-surface: #fff;
+    --color-surface-muted: #fff;
+    --color-text: #111;
+    --color-muted: #333;
+    --color-border: #777;
+    --color-primary: #333;
+    --chart-series-secondary: #aaa;
+    display: block !important;
+    width: 100% !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    background: #fff !important;
+    color: #111 !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  #print-root,
+  #print-root * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+  }
+
+  #print-root .workpath-report {
+    color: #111 !important;
+  }
+
+  #print-root .report-tile,
+  #print-root .report-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  #print-root .report-chart-section {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #print-root .stats-chart svg {
+    overflow: hidden !important;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  #print-root .stats-chart text,
+  #print-root .stats-chart .chart-value,
+  #print-root .stats-chart .chart-none {
+    fill: #111 !important;
+  }
+
+  #print-root .chart-bar {
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  #print-root .chart-legend text {
+    font-weight: 700;
+  }
+
+  #print-root table {
+    width: 100% !important;
+    min-width: 0 !important;
+    table-layout: fixed;
+    border-collapse: collapse;
+  }
+
+  #print-root .stats-chart-data-table {
+    display: none !important;
+  }
+
+  #print-root thead {
+    display: table-header-group;
+  }
+
+  #print-root tr {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  #print-root th,
+  #print-root td {
+    overflow-wrap: anywhere;
+  }
+
+  #print-root .status-badge {
+    border: 1px solid #333 !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
+
+  #print-root .report-empty {
+    color: #111 !important;
+  }
+}

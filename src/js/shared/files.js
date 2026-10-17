@@ -2,6 +2,7 @@ import { DataError } from '../data/errors.js';
 
 export const MAX_TEXT_FILE_BYTES = 10 * 1024 * 1024;
 export const FILE_TOO_LARGE_MESSAGE = 'This file is larger than the 10 MB limit. Choose a smaller file.';
+export const PRINT_UNAVAILABLE_MESSAGE = "Printing isn't available here.";
 
 export function validateTextFileSize(file, maxBytes = MAX_TEXT_FILE_BYTES) {
   if (!Number.isFinite(maxBytes) || maxBytes < 0) {
@@ -69,4 +70,40 @@ export function pickTextFile({ accept = 'text/plain', maxBytes = MAX_TEXT_FILE_B
     document.body.append(input);
     input.click();
   });
+}
+
+/** Render a report in an isolated document section and open the browser print dialog. */
+export function printReport({ title, render }) {
+  const pageWindow = globalThis.window;
+  if (typeof document === 'undefined' || !document.body || typeof pageWindow?.print !== 'function') {
+    throw new DataError('unknown', PRINT_UNAVAILABLE_MESSAGE);
+  }
+  if (typeof render !== 'function') {
+    throw new DataError('validation', 'The report could not be prepared for printing.');
+  }
+
+  const markup = render();
+  const previousTitle = document.title;
+  document.getElementById('print-root')?.remove();
+  const root = document.createElement('main');
+  root.id = 'print-root';
+  root.innerHTML = String(markup ?? '');
+  let cleaned = false;
+  const cleanup = () => {
+    if (cleaned) return;
+    cleaned = true;
+    pageWindow.removeEventListener('afterprint', cleanup);
+    root.remove();
+    document.title = previousTitle;
+  };
+
+  document.body.append(root);
+  document.title = String(title || 'Workpath report');
+  pageWindow.addEventListener('afterprint', cleanup, { once: true });
+  try {
+    pageWindow.print();
+  } catch {
+    cleanup();
+    throw new DataError('unknown', PRINT_UNAVAILABLE_MESSAGE);
+  }
 }

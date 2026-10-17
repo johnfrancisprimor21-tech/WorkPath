@@ -67,8 +67,14 @@ const MAX_HOURLY_RATE = 99_999_999.99;
 
 export function detectCsvList(headers) {
   const names = new Set(headers.map(normalizeHeader));
-  const matches = IMPORT_LISTS.filter((list) => CSV_FORMATS[list].required.every((name) => names.has(name)));
-  return matches.length === 1 ? matches[0] : null;
+  const scored = IMPORT_LISTS.map((list) => ({
+    list,
+    score: CSV_FORMATS[list].headers.filter((name) => names.has(name)).length
+  })).filter((candidate) => candidate.score > 0);
+  if (!scored.length) return null;
+  const highest = Math.max(...scored.map((candidate) => candidate.score));
+  const winners = scored.filter((candidate) => candidate.score === highest);
+  return winners.length === 1 ? winners[0].list : null;
 }
 
 export function exportCsv(list, data, profile = {}) {

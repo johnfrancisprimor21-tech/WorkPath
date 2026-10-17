@@ -166,7 +166,7 @@ export function renderTransferSection({
       }
       const detected = detectCsvList(parsedCsv.headers);
       if (detected) {
-        await prepareCsvPreview(parsedCsv, detected, picked.name);
+        await prepareCsvPreview(parsedCsv, detected, `File: ${picked.name} · Detected list: ${CSV_LIST_LABELS[detected]}`);
       } else {
         renderCsvListChooser(parsedCsv, picked.name);
       }
@@ -188,7 +188,9 @@ export function renderTransferSection({
     const choices = el('div', { className: 'csv-list-choices' });
     for (const list of CSV_IMPORT_LISTS) {
       const button = makeButton('Import as ' + CSV_LIST_LABELS[list], { className: 'button button-secondary' });
-      button.addEventListener('click', () => { void prepareCsvPreview(parsedCsv, list, 'File: ' + fileName); });
+      button.addEventListener('click', () => {
+        void prepareCsvPreview(parsedCsv, list, `File: ${fileName} · Selected list: ${CSV_LIST_LABELS[list]}`);
+      });
       choices.append(button);
     }
     const cancel = makeButton('Cancel', { className: 'button button-secondary' });

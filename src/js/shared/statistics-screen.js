@@ -6,6 +6,8 @@ import { formatMoney } from './money.js';
 import { formatWorkedMinutes } from './aggregations.js';
 import { formatMonthLabel, todayInTimeZone } from './time.js';
 import { barChart, horizontalBars } from './charts.js';
+import { printReport } from './files.js';
+import { buildReportModel, renderReportHtml } from './report.js';
 import {
   applicationsByMonth,
   applicationsByStatus,
@@ -49,18 +51,34 @@ function renderStatisticsPage({ mode, repo, profile, selectedRange, onRangeChang
   }
   rangeSelect.value = String(RANGE_OPTIONS.includes(Number(selectedRange)) ? Number(selectedRange) : 6);
   const controls = employed ? field('Time range', rangeSelect, { className: 'field stats-range-field' }) : null;
+  const exportButton = makeButton('Export PDF', { className: 'button button-secondary', disabled: true });
+  const toolbar = el('div', { className: 'stats-page-toolbar' }, [
+    ...(controls ? [controls] : []),
+    exportButton
+  ]);
   const summary = el('section', {
     className: `month-summary stats-summary ${employed ? 'stats-summary-three' : 'stats-summary-single'}`,
     attrs: { 'aria-label': employed ? 'Work statistics summary' : 'Job search statistics summary' }
   });
   const content = el('div', { className: 'stats-content' });
-  card.append(...(controls ? [controls] : []), message, latestNote, summary, content);
+  card.append(toolbar, message, latestNote, summary, content);
   page.append(card, employed
     ? renderEmployedNavigation('/employed/stats')
     : renderJobSeekerNavigation('/seeker/stats'));
 
   let loadVersion = 0;
   let range = Number(rangeSelect.value);
+  let reportData = null;
+  exportButton.addEventListener('click', () => {
+    if (!reportData) return;
+    try {
+      const model = buildReportModel(reportData);
+      printReport({ title: model.title, render: () => renderReportHtml(model) });
+      setMessage(message, '', 'status');
+    } catch (error) {
+      setMessage(message, error.message || "Printing isn't available here.", 'error');
+    }
+  });
   rangeSelect.addEventListener('change', () => {
     range = RANGE_OPTIONS.includes(Number(rangeSelect.value)) ? Number(rangeSelect.value) : 6;
     rangeSelect.value = String(range);
@@ -73,6 +91,8 @@ function renderStatisticsPage({ mode, repo, profile, selectedRange, onRangeChang
 
   async function load() {
     const version = ++loadVersion;
+    reportData = null;
+    exportButton.disabled = true;
     setMessage(message, 'Loading statistics…', 'loading');
     rangeSelect.disabled = true;
     summary.setAttribute('aria-busy', 'true');
@@ -90,13 +110,16 @@ function renderStatisticsPage({ mode, repo, profile, selectedRange, onRangeChang
         ]);
         if (version !== loadVersion) return;
         renderEmployedStats({ summary, content, shifts, payrollEntries, employments, today, range, rangeDates, profile });
+        reportData = { mode, profile, today, range, rangeDates, shifts, payrollEntries, employments };
       } else {
         const applications = await repo.applications.list({ limit: APPLICATION_LIMIT });
         if (version !== loadVersion) return;
         renderJobSeekerStats({ summary, content, applications, today });
         latestNote.hidden = applications.length < APPLICATION_LIMIT;
         if (!latestNote.hidden) latestNote.textContent = `Showing the most recent ${APPLICATION_LIMIT.toLocaleString()} applications.`;
+        reportData = { mode, profile, today, applications, applicationLimit: APPLICATION_LIMIT };
       }
+      exportButton.disabled = false;
       setMessage(message, '', 'status');
     } catch (error) {
       if (version !== loadVersion) return;

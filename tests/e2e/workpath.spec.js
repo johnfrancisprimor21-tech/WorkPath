@@ -537,6 +537,74 @@ test.describe('Local mode through the real Vite app @local', () => {
     expect(externalRequests).toEqual([]);
   });
 
+  test('Stats exports print-ready PDF reports for both modes @local', async ({ page }, testInfo) => {
+    const externalRequests = await startLocal(page, { displayName: 'PDF Local E2E' });
+    await createJob(page, { name: 'E2E-PDF Employer', title: 'Report role', rate: '25' });
+    await createShift(page, {
+      date: '2026-10-15', timeIn: '22:00', timeOut: '06:00', breakMinutes: '60',
+      jobName: 'E2E-PDF Employer'
+    });
+    await page.goto('/#/employed/stats');
+    await expect(page.getByRole('heading', { name: 'Stats' })).toBeVisible();
+    await page.getByLabel('Time range').selectOption('3');
+    const printButton = page.getByRole('button', { name: 'Export PDF' });
+    await expect(printButton).toBeEnabled();
+    const originalTitle = await page.title();
+    await page.evaluate(() => {
+      window.print = () => { window.__workpathPrintCalls = (window.__workpathPrintCalls || 0) + 1; };
+    });
+
+    const assertPaperFormats = async (mode) => {
+      for (const { format, contentWidth } of [
+        { format: 'A4', contentWidth: 680 },
+        { format: 'Letter', contentWidth: 702 }
+      ]) {
+        await page.emulateMedia({ media: null });
+        await page.setViewportSize({ width: contentWidth, height: 1000 });
+        await page.getByRole('button', { name: 'Export PDF' }).click();
+        const printRoot = page.locator('#print-root');
+        await expect(printRoot).toBeAttached();
+        await expect(printRoot).toContainText(mode === 'employed' ? 'Employed Statistics Report' : 'Job Seeker Statistics Report');
+        if (mode === 'employed') await expect(printRoot).toContainText('7h 0m');
+        else await expect(printRoot).toContainText('No data in this range.');
+        expect(await page.title()).toBe(mode === 'employed' ? 'Employed Statistics Report' : 'Job Seeker Statistics Report');
+        expect(await page.evaluate(() => window.__workpathPrintCalls)).toBe(mode === 'employed' ? (format === 'A4' ? 1 : 2) : (format === 'A4' ? 3 : 4));
+
+        await page.emulateMedia({ media: 'print' });
+        await expect(page.locator('nav').first()).toBeHidden();
+        expect(await page.locator('body').evaluate((node) => getComputedStyle(node).backgroundColor)).toBe('rgb(255, 255, 255)');
+        const layout = await page.evaluate(() => ({
+          viewport: window.innerWidth,
+          document: document.documentElement.scrollWidth,
+          root: document.querySelector('#print-root')?.scrollWidth
+        }));
+        expect(layout.document <= layout.viewport, `${mode} ${format}: ${JSON.stringify(layout)}`).toBe(true);
+        expect(layout.root <= layout.viewport, `${mode} ${format}: ${JSON.stringify(layout)}`).toBe(true);
+
+        const pdfPath = testInfo.outputPath(`${mode}-${format.toLowerCase()}.pdf`);
+        const pdf = await page.pdf({ path: pdfPath, format });
+        expect(pdf.byteLength).toBeGreaterThan(0);
+        expect(pdf.toString('latin1')).toMatch(/\/Type\s*\/Page\b/);
+
+        await page.emulateMedia({ media: null });
+        await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+        await expect(printRoot).toHaveCount(0);
+        expect(await page.title()).toBe(originalTitle);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+    };
+
+    await assertPaperFormats('employed');
+    expect(await page.getByLabel('Time range').inputValue()).toBe('3');
+
+    await ensureMode(page, 'job_seeker');
+    await page.goto('/#/seeker/stats');
+    await expect(page.getByRole('heading', { name: 'Stats' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Export PDF' })).toBeEnabled();
+    await assertPaperFormats('job-seeker');
+    expect(externalRequests).toEqual([]);
+  });
+
   test('phone layout fits and forms are keyboard reachable @phone', async ({ page }) => {
     const externalRequests = await startLocal(page, { displayName: 'Keyboard Local E2E' });
     await page.goto('/#/employed/jobs');
